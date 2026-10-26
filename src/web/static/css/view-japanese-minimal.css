@@ -862,8 +862,13 @@ html.yg-shell.yg-history .btn {
   box-shadow: none !important;
 }
 
-/* History primary query button = the ONE hanko */
+/* History: only 查询 is the ONE hanko; other primaries demoted */
 html.yg-shell.yg-history .btn-primary {
+  background: transparent !important;
+  color: var(--ink) !important;
+  border: 1px solid var(--line-strong) !important;
+}
+html.yg-shell.yg-history #historyQueryBtn.btn-primary {
   background: var(--accent) !important;
   color: #fffefc !important;
   border: 1px solid var(--accent) !important;
@@ -1895,3 +1900,133 @@ html.yg-shell .export-toolbar-saas {
   outline: 2px solid var(--pine);
   outline-offset: 1px;
 }
+
+
+/* === yg8: history paper chrome polish === */
+html.yg-shell.yg-history .unread-badge {
+  background: transparent !important;
+  color: var(--accent) !important;
+  border: 1px solid var(--accent) !important;
+  border-radius: 1px !important;
+  font-family: var(--font-sans) !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.04em;
+  padding: 2px 8px !important;
+}
+
+html.yg-shell.yg-history .read-dot {
+  background: var(--accent) !important;
+  border-radius: 1px !important;
+  width: 6px !important;
+  height: 6px !important;
+}
+
+html.yg-shell.yg-history .state-box {
+  background: var(--bg-elevated) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 1px !important;
+  color: var(--ink-secondary) !important;
+  font-family: var(--font-serif) !important;
+}
+
+html.yg-shell.yg-history .auth-status.ok {
+  background: var(--success-bg) !important;
+  border: 1px solid var(--success-border) !important;
+  color: var(--success-text) !important;
+  border-radius: 1px !important;
+  font-family: var(--font-sans) !important;
+  font-weight: 500 !important;
+}
+
+html.yg-shell.yg-history .auth-status.err {
+  background: var(--error-bg) !important;
+  border: 1px solid var(--error-border) !important;
+  color: var(--error-text) !important;
+  border-radius: 1px !important;
+  font-family: var(--font-sans) !important;
+}
+
+html.yg-shell.yg-history .multi-select,
+html.yg-shell.yg-history .multi-dropdown,
+html.yg-shell.yg-history .alias-input,
+html.yg-shell.yg-history .yg-filter-q {
+  background: var(--bg) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 1px !important;
+  color: var(--ink) !important;
+  box-shadow: none !important;
+}
+
+html.yg-shell.yg-history .multi-opt:hover {
+  background: var(--bg-stone) !important;
+}
+
+html.yg-shell.yg-history .summary-tooltip {
+  background: var(--bg-elevated) !important;
+  border: 1px solid var(--line-strong) !important;
+  border-radius: 1px !important;
+  box-shadow: var(--shadow-soft) !important;
+  color: var(--ink-secondary) !important;
+  font-family: var(--font-serif) !important;
+}
+
+html.yg-shell.yg-history .summary-tooltip-title {
+  font-family: var(--font-serif) !important;
+  font-weight: 500 !important;
+  color: var(--ink) !important;
+}
+
+html.yg-shell.yg-history .task-platform,
+html.yg-shell.yg-history .task-status-badge {
+  border-radius: 1px !important;
+  font-family: var(--font-sans) !important;
+  background: var(--bg-stone) !important;
+  color: var(--ink-secondary) !important;
+  border: 1px solid var(--line) !important;
+}
+
+html.yg-shell.yg-history .status-failed {
+  background: var(--error-bg) !important;
+  color: var(--error-text) !important;
+  border-color: var(--error-border) !important;
+}
+
+html.yg-shell.yg-history .status-processing {
+  background: var(--loading-bg) !important;
+  color: var(--loading-text) !important;
+  border-color: var(--loading-border) !important;
+}
+
+html.yg-shell.yg-history .stats-bar,
+html.yg-shell.yg-history .yg-history-hint,
+html.yg-shell.yg-history .filter-group label,
+html.yg-shell.yg-history .auth-bar label,
+html.yg-shell.yg-history .page-info,
+html.yg-shell.yg-history .alias-save-hint {
+  font-family: var(--font-sans) !important;
+  color: var(--ink-tertiary) !important;
+}
+
+html.yg-shell.yg-history .row-checkbox {
+  accent-color: var(--pine) !important;
+}
+
+html.yg-shell.yg-history .task-row.read .task-title {
+  opacity: 0.55 !important;
+}
+
+html.yg-shell.yg-history #selectedCount {
+  color: var(--pine) !important;
+  font-family: var(--font-sans) !important;
+}
+
+html.yg-shell.yg-history .yg-mast {
+  margin: 0 calc(-1 * var(--page-pad-x));
+  padding-left: var(--page-pad-x);
+  padding-right: var(--page-pad-x);
+}
+
+html.yg-shell.yg-history .header {
+  border-bottom: 1px solid var(--line) !important;
+}
+

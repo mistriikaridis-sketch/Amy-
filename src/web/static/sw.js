@@ -1,5 +1,5 @@
 /*
- * Service Worker for the VideoTranscriptAPI PWA (design: docs/designs/pwa.md T4).
+ * Service Worker for the 阅稿 PWA (design: docs/designs/pwa.md T4).
  *
  * Served from the root path (GET /sw.js, see api/app.py) so its scope covers
  * "/". The fetch policy is a strict whitelist -- with scope "/" every

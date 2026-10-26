@@ -1,15 +1,31 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="dark">
+<html lang="zh-CN" data-theme="light">
 <head>
+    <script>
+    (function() {
+        var migrated = localStorage.getItem('vta_jp_paper_v2');
+        var saved = null;
+        try { var raw = localStorage.getItem('vta_theme_preference'); saved = raw ? JSON.parse(raw) : null; } catch (e) { saved = localStorage.getItem('vta_theme_preference'); }
+        var theme = 'light';
+        if (migrated === '1' && (saved === 'light' || saved === 'dark')) theme = saved;
+        else {
+          try { localStorage.setItem('vta_jp_paper_v2', '1'); localStorage.setItem('vta_theme_preference', JSON.stringify('light')); } catch (e) {}
+        }
+        document.documentElement.setAttribute('data-theme', theme);
+        document.documentElement.classList.add('jp-minimal', 'yg-shell', 'yg-history');
+    })();
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#4f46e5">
-    <title data-i18n="web.history.title">任务历史 - VideoTranscriptAPI</title>
+    <meta name="theme-color" content="#fafaf7">
+    <meta name="robots" content="noindex">
+    <title data-i18n="web.history.title">阅稿 · 历史</title>
     <link rel="manifest" href="/static/manifest.webmanifest">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
     <link rel="stylesheet" href="/static/css/styles.css">
+    <link rel="stylesheet" href="/static/css/view-japanese-minimal.css?v=yg8">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -463,18 +479,29 @@
         }
     </style>
 </head>
-<body>
+<body class="yg-history">
 <div class="container">
+    <header class="yg-mast">
+        <a class="yg-brand" href="/">
+            <span class="yg-seal" aria-hidden="true">阅</span>
+            <span class="yg-brand-name">阅稿</span>
+        </a>
+        <label class="yg-lang-switch" style="margin-inline-end:.5rem"><span class="yg-lang-label" data-i18n="web.ui.language_label">界面语言</span>
+        <select id="yg-static-lang-select" data-i18n-aria-label="web.ui.language_switch_aria" aria-label="切换界面语言"></select></label>
+        <nav class="yg-mast-links" aria-label="主导航">
+            <a href="/" data-i18n="web.nav.home">首页</a>
+            <a href="/add_task_by_web" data-i18n="web.nav.submit">开始</a>
+            <a href="/static/history.html" aria-current="page" data-i18n="web.nav.history">历史</a>
+            <a href="/static/help-advanced.html" data-i18n="web.nav.advanced">进阶</a>
+            <button type="button" id="theme-toggle" class="theme-toggle" data-i18n-title="web.theme.to_light" title="切换到浅色模式" style="margin-left:.35rem">〇</button>
+            <button type="button" id="pwa-install-btn" class="site-nav-link"
+                    style="display:none; background:none; cursor:pointer; font:inherit; border:none; color:inherit; padding:0; min-height:44px;"
+                    data-i18n="web.nav.install" data-i18n-aria-label="web.nav.install_aria"
+                    aria-label="安装应用到桌面">安装</button>
+        </nav>
+    </header>
     <div class="header">
         <h1 data-i18n="web.history.heading">任务历史</h1>
-        <nav class="site-nav">
-            <a href="/add_task_by_web" class="site-nav-link" data-i18n="web.nav.submit">📝 提交任务</a>
-            <a href="/" class="site-nav-link" data-i18n="web.nav.back_home">← 返回主页</a>
-            <button type="button" id="pwa-install-btn" class="site-nav-link"
-                    style="display:none; min-height:44px; background:none; cursor:pointer; font:inherit;"
-                    data-i18n="web.nav.install" data-i18n-aria-label="web.nav.install_aria"
-                    aria-label="安装应用到桌面">📥 安装应用</button>
-        </nav>
     </div>
 
     <!-- Unified access token input -->
@@ -494,7 +521,7 @@
     <div class="alias-panel" id="aliasPanel">
         <h3 data-i18n="web.history.alias_heading">Webhook 别名（保存在本地浏览器）</h3>
         <div id="aliasRows"></div>
-        <button class="btn btn-primary" onclick="saveAliases()" style="margin-top:10px; font-size:0.8rem; padding:6px 14px" data-i18n="web.history.alias_save">
+        <button class="btn btn-ghost" onclick="saveAliases()" style="margin-top:10px; font-size:0.8rem; padding:6px 14px" data-i18n="web.history.alias_save">
             保存别名
         </button>
         <div class="alias-save-hint" data-i18n="web.history.alias_hint">* 别名仅存储在本地，清除浏览器数据后会丢失</div>
@@ -562,12 +589,12 @@
         </div>
         <div class="filter-group" style="min-width:200px; flex:1">
             <label data-i18n="web.history.filter_search">搜索</label>
-            <input type="text" id="filterQ" data-i18n-placeholder="web.history.search_placeholder" placeholder="标题 / 频道 / URL..."
-                   style="width:100%; background:var(--bg-secondary); border:1px solid var(--border-primary);
-                          border-radius:8px; padding:7px 10px; color:var(--text-primary); font-size:0.8rem;">
+            <input type="text" id="filterQ" class="yg-filter-q" data-i18n-placeholder="web.history.search_placeholder" placeholder="标题 / 频道 / URL..."
+                   style="width:100%; background:var(--bg); border:1px solid var(--line,#e8e4dc);
+                          border-radius:1px; padding:7px 10px; color:var(--ink,#1a1a18); font-size:0.8rem;">
         </div>
         <div class="filter-actions">
-            <button class="btn btn-primary" onclick="applyFilter()" data-i18n="web.history.search">搜索</button>
+            <button class="btn btn-ghost" onclick="applyFilter()" data-i18n="web.history.search">搜索</button>
             <button class="btn btn-ghost" onclick="resetFilter()" data-i18n="web.history.reset">重置</button>
         </div>
     </div>
@@ -609,14 +636,49 @@
     <div id="tooltipContent"></div>
 </div>
 
-<script src="/i18n.js"></script>
-<script src="/static/js/i18n.js"></script>
-<script src="/static/js/auth-storage.js"></script>
+<script src="/static/js/lang-boot.js?v=yg-lang1"></script>
+<script>
+(function () {
+  var lang = window.__VTA_UI_LANG_BOOT__ || "";
+  var src = lang ? ("/i18n.js?lang=" + encodeURIComponent(lang)) : "/i18n.js";
+  document.write('<script src="' + src + '"><\/script>');
+})();
+</script>
+<script src="/static/js/i18n.js?v=yg-lang1"></script>
+<script src="/static/js/auth-storage.js?v=yg-auth2"></script>
 <script>
 if (typeof window.applyI18n === 'function') {
     window.applyI18n();
 }
+if (typeof window.ygMountLanguageSwitcher === 'function') {
+    window.ygMountLanguageSwitcher();
+}
 const t = window.t;
+
+/* Minimal theme toggle (history does not load app.js ThemeManager) */
+(function () {
+  function apply(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    try { localStorage.setItem('vta_theme_preference', JSON.stringify(theme)); } catch (e) {}
+    var btn = document.getElementById('theme-toggle');
+    if (!btn || typeof t !== 'function') return;
+    if (theme === 'dark') {
+      btn.textContent = '〇';
+      btn.title = t('web.theme.to_light');
+    } else {
+      btn.textContent = '●';
+      btn.title = t('web.theme.to_dark');
+    }
+  }
+  var btn = document.getElementById('theme-toggle');
+  if (btn) {
+    btn.addEventListener('click', function () {
+      var cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+      apply(cur === 'dark' ? 'light' : 'dark');
+    });
+    apply(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light');
+  }
+})();
 
 // ===================== 状态 =====================
 const STORAGE_KEY_READ  = () => `vta_read_${getMasked()}`;

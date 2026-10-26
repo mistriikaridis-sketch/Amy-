@@ -152,3 +152,9 @@ patch-bak-*/
 !.env.example
 # OSS staging (if ever created inside tree)
 yuegao-oss/
+
+# BBDown platform binaries - download separately; do not ship in OSS tree
+BBDown/BBDown
+BBDown/BBDown.exe
+BBDown/BBDown_Mac
+BBDown/*.exe

@@ -1,5 +1,5 @@
 /*
- * PWA glue for VideoTranscriptAPI (design: docs/designs/pwa.md T5).
+ * PWA glue for 阅稿 (design: docs/designs/pwa.md T5).
  *
  * Loaded by both entry pages (index.html / history.html):
  *   - registers the service worker at /sw.js (root scope);
@@ -215,7 +215,7 @@
     close.style.cssText =
       'display:block;margin:12px auto 0;min-height:44px;min-width:88px;' +
       'padding:8px 20px;border:none;border-radius:8px;cursor:pointer;' +
-      'background:var(--accent-primary,#4f46e5);color:#fff;font-size:.85rem;';
+      'background:var(--accent-primary,#c3272b);color:#fff;font-size:.85rem;';
     close.addEventListener('click', function () {
       rememberDismiss(IOS_HINT_DISMISS_KEY);
       hint.remove();
