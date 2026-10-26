@@ -7,21 +7,21 @@
 :root {
     /* PC 端浮动 TOC */
     --toc-width-collapsed: 2.5rem;
-    --toc-width-expanded: 280px;
-    --toc-right-offset: 20px;
-    --toc-top-offset: 100px;
+    --toc-width-expanded: 16rem;
+    --toc-right-offset: 12px;
+    --toc-top-offset: 7.5rem;
 
-    /* 深色主题（默认） */
-    --toc-bg: rgba(30, 41, 59, 0.95);
-    --toc-border: #475569;
-    --toc-text: #f8fafc;
-    --toc-text-secondary: #cbd5e1;
-    --toc-active: #06B6D4;
-    --toc-hover: #334155;
-    --toc-hairline: rgba(71, 85, 105, 0.45);
-    --toc-indicator-start: #06B6D4;
-    --toc-indicator-end: #3B82F6;
-    --toc-shadow: rgba(0, 0, 0, 0.3);
+    /* Paper rail — ink, hairline, one hanko on the active row */
+    --toc-bg: #fffefc;
+    --toc-border: #e8e4dc;
+    --toc-text: #1a1a18;
+    --toc-text-secondary: #5c5852;
+    --toc-active: #c3272b;
+    --toc-hover: #f3f0ea;
+    --toc-hairline: #e8e4dc;
+    --toc-indicator-start: #1a1a18;
+    --toc-indicator-end: #5c5852;
+    --toc-shadow: rgba(26, 26, 24, 0.06);
 
     /* 移动端浮动按钮 */
     --toc-mobile-btn-size: 56px;
@@ -29,18 +29,18 @@
     --toc-mobile-btn-right: 20px;
 }
 
-/* 浅色主题 */
+/* 浅色主题 — same paper rail */
 [data-theme="light"] {
-    --toc-bg: rgba(255, 255, 255, 0.95);
-    --toc-border: #e5e7eb;
-    --toc-text: #333;
-    --toc-text-secondary: #6b7280;
-    --toc-active: #667eea;
-    --toc-hover: #f3f4f6;
-    --toc-hairline: rgba(107, 114, 128, 0.22);
-    --toc-indicator-start: #667eea;
-    --toc-indicator-end: #764ba2;
-    --toc-shadow: rgba(0, 0, 0, 0.1);
+    --toc-bg: #fffefc;
+    --toc-border: #e8e4dc;
+    --toc-text: #1a1a18;
+    --toc-text-secondary: #5c5852;
+    --toc-active: #c3272b;
+    --toc-hover: #f3f0ea;
+    --toc-hairline: #e8e4dc;
+    --toc-indicator-start: #1a1a18;
+    --toc-indicator-end: #5c5852;
+    --toc-shadow: rgba(26, 26, 24, 0.06);
 }
 
 /* ========== PC 端浮动 TOC ========== */
@@ -567,7 +567,8 @@
 /* 新模式：默认展开，不受 hover 影响。章节面板要容纳摘要段落，
    比旧大纲模式的 280px 更宽（旧无章节路径仍用 --toc-width-expanded）。 */
 .floating-toc-container.toc-new {
-    width: 360px;
+    width: min(16rem, 32vw);
+    top: var(--toc-top-offset);
 }
 
 .floating-toc-container.toc-new .toc-header,
@@ -595,12 +596,12 @@
     cursor: pointer;
 }
 
-/* 宽屏（>=1400px）：面板停靠为常驻侧栏，正文在面板左侧剩余空间内居中。
-   body 为 content-box：max-width 900px + 左右 padding 各 20px，实际占位 940px；
-   margin-right 预留 420px 面板位后，再吸收剩余空间的一半，margin-left auto 吸收另一半。 */
-body.toc-wide-margin {
-    margin-left: auto;
-    margin-right: calc(420px + (100vw - 420px - 940px) / 2);
+/* Wide screens: the paper shell reserves a right rail in padding.
+   Do not pull the body with a fixed 940px margin — that slides titles under the TOC. */
+html.jp-minimal body.toc-wide-margin {
+    max-width: none !important;
+    margin: 0 !important;
+    padding-right: calc(18rem + 2.25rem) !important;
 }
 
 .floating-toc-container.toc-docked {

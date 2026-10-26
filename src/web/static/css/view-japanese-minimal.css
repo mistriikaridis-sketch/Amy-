@@ -6,7 +6,7 @@
  * Load AFTER styles.css / page inline chrome so tokens win.
  */
 
-@import url("https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600&family=Noto+Sans+SC:wght@400;500&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500&family=Noto+Serif+JP:wght@400;500&family=Noto+Sans+SC:wght@400;500&family=Noto+Sans+JP:wght@400;500&display=swap");
 
 /* ==========================================================================
    1) Design tokens
@@ -39,9 +39,9 @@ html.jp-minimal {
   --speaker-6: #5a7a8b;
   --speaker-7: #6b6560;
 
-  --font-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC",
+  --font-serif: "Noto Serif SC", "Noto Serif JP", "Source Han Serif SC", "Songti SC",
     "Hiragino Mincho ProN", "STSong", "SimSun", serif;
-  --font-sans: "Noto Sans SC", "Source Han Sans SC", "PingFang SC",
+  --font-sans: "Noto Sans SC", "Noto Sans JP", "Source Han Sans SC", "PingFang SC",
     "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", "Sarasa Mono SC", ui-monospace, SFMono-Regular,
     Menlo, Consolas, monospace;
@@ -2028,5 +2028,86 @@ html.yg-shell.yg-history .yg-mast {
 
 html.yg-shell.yg-history .header {
   border-bottom: 1px solid var(--line) !important;
+}
+
+/* ==========================================================================
+   yg10 — reading column + link-only chrome
+   Body copy is slightly smaller and centered so it stays off side rules.
+   TOC clearance stays on body.toc-wide-margin / :has(#floating-toc) only,
+   so the home and history shells keep a centered paper column.
+   ========================================================================== */
+
+html.jp-minimal {
+  --yg-measure: 38rem;
+  --yg-toc-gap: 2.25rem;
+  --yg-toc-wide: 18rem;
+  --yg-toc-mid: 16rem;
+}
+
+html.jp-minimal .content,
+html.jp-minimal .dialog-content,
+html.jp-minimal .markdown-body,
+html.jp-minimal #summary-content-block,
+html.jp-minimal #notes-content-block,
+html.jp-minimal #calibrated-content-block {
+  font-size: 0.98rem !important;
+  line-height: 2.05 !important;
+  text-align: center !important;
+  padding-inline: 1rem !important;
+}
+
+html.jp-minimal .content p,
+html.jp-minimal .dialog-content p,
+html.jp-minimal .markdown-body p,
+html.jp-minimal .markdown-body li,
+html.jp-minimal .chapter-anchor-gist {
+  text-align: center !important;
+  font-size: 0.98rem !important;
+  line-height: 2.05 !important;
+}
+
+html.jp-minimal .dialog-item {
+  padding-left: 1.2rem !important;
+  padding-right: 0.4rem !important;
+}
+
+html.jp-minimal .section h2,
+html.jp-minimal .section-header h2,
+html.jp-minimal .chapter-anchor-title,
+html.jp-minimal .header h1 {
+  scroll-margin-top: 1.5rem;
+  position: relative;
+  z-index: 1;
+}
+
+html.jp-minimal .chapter-anchor-title {
+  text-align: center !important;
+  padding-inline: 0.5rem;
+}
+
+html.jp-minimal body.toc-wide-margin {
+  max-width: none !important;
+  width: auto !important;
+  margin: 0 !important;
+  padding-right: calc(var(--yg-toc-wide) + var(--yg-toc-gap)) !important;
+}
+
+@media (max-width: 768px) {
+  html.jp-minimal body {
+    padding-right: 0 !important;
+  }
+  html.jp-minimal .dialog-item {
+    border-left-width: 2px !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+  }
+}
+
+/* Local upload is not part of the product surface. */
+html.yg-shell #mode-tabs,
+html.yg-shell #mode-tab-upload,
+html.yg-shell #upload-mode-panel,
+html.yg-shell #upload-disabled-banner {
+  display: none !important;
 }
 

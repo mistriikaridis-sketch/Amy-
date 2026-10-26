@@ -1,63 +1,63 @@
 /* CSS变量定义 - 主题系统 */
 :root {
-    /* 深色主题（默认） */
-    --bg-gradient-start: #1e293b;
-    --bg-gradient-end: #0f172a;
-    --text-primary: #f8fafc;
-    --text-secondary: #cbd5e1;
-    --text-tertiary: #94a3b8;
-    --bg-primary: #1e293b;
-    --bg-secondary: #334155;
-    --bg-tertiary: #475569;
-    --border-primary: #475569;
-    --border-secondary: #64748b;
-    --border-focus: #667eea;
-    --shadow-light: rgba(0,0,0,0.3);
-    --shadow-medium: rgba(0,0,0,0.5);
-    --header-text: #f8fafc;
-    --accent-primary: #667eea;
-    --accent-secondary: #764ba2;
-    --success-bg: #064e3b;
-    --success-border: #059669;
-    --success-text: #34d399;
-    --error-bg: #7f1d1d;
-    --error-border: #dc2626;
-    --error-text: #fca5a5;
-    --loading-bg: #0c4a6e;
-    --loading-border: #0ea5e9;
-    --loading-text: #38bdf8;
-    --scrollbar-track: #334155;
-    --scrollbar-thumb: #64748b;
-    --scrollbar-thumb-hover: #94a3b8;
+    /* Paper default — ink on warm paper, pine for links. Vermillion is reserved. */
+    --bg-gradient-start: #fafaf7;
+    --bg-gradient-end: #f3f0ea;
+    --text-primary: #1a1a18;
+    --text-secondary: #5c5852;
+    --text-tertiary: #8a847c;
+    --bg-primary: #fffefc;
+    --bg-secondary: #fafaf7;
+    --bg-tertiary: #f3f0ea;
+    --border-primary: #e8e4dc;
+    --border-secondary: #ddd7cc;
+    --border-focus: #2f5d50;
+    --shadow-light: rgba(26,26,24,0.04);
+    --shadow-medium: rgba(26,26,24,0.08);
+    --header-text: #1a1a18;
+    --accent-primary: #2f5d50;
+    --accent-secondary: #3d7264;
+    --success-bg: #eef4f1;
+    --success-border: #a8c4b8;
+    --success-text: #2f5d50;
+    --error-bg: #f7ebe9;
+    --error-border: #d4a8a6;
+    --error-text: #8f3d3d;
+    --loading-bg: #f3f0ea;
+    --loading-border: #ddd7cc;
+    --loading-text: #5c5852;
+    --scrollbar-track: #f3f0ea;
+    --scrollbar-thumb: #ddd7cc;
+    --scrollbar-thumb-hover: #8a847c;
 }
 
-/* 浅色主题 */
+/* 浅色主题 — same paper shell */
 [data-theme="light"] {
-    --bg-gradient-start: #667eea;
-    --bg-gradient-end: #764ba2;
-    --text-primary: #333;
-    --text-secondary: #6b7280;
-    --text-tertiary: #9ca3af;
-    --bg-primary: #ffffff;
-    --bg-secondary: #f9fafb;
-    --bg-tertiary: #f3f4f6;
-    --border-primary: #e5e7eb;
-    --border-secondary: #d1d5db;
-    --border-focus: #667eea;
-    --shadow-light: rgba(0,0,0,0.1);
-    --shadow-medium: rgba(0,0,0,0.2);
-    --header-text: #ffffff;
-    --accent-primary: #667eea;
-    --accent-secondary: #764ba2;
-    --success-bg: #ecfdf5;
-    --success-border: #10b981;
-    --success-text: #059669;
-    --error-bg: #fef2f2;
-    --error-border: #ef4444;
-    --error-text: #dc2626;
-    --loading-bg: #f0f9ff;
-    --loading-border: #06b6d4;
-    --loading-text: #0891b2;
+    --bg-gradient-start: #fafaf7;
+    --bg-gradient-end: #f3f0ea;
+    --text-primary: #1a1a18;
+    --text-secondary: #5c5852;
+    --text-tertiary: #8a847c;
+    --bg-primary: #fffefc;
+    --bg-secondary: #fafaf7;
+    --bg-tertiary: #f3f0ea;
+    --border-primary: #e8e4dc;
+    --border-secondary: #ddd7cc;
+    --border-focus: #2f5d50;
+    --shadow-light: rgba(26,26,24,0.04);
+    --shadow-medium: rgba(26,26,24,0.08);
+    --header-text: #1a1a18;
+    --accent-primary: #2f5d50;
+    --accent-secondary: #3d7264;
+    --success-bg: #eef4f1;
+    --success-border: #a8c4b8;
+    --success-text: #2f5d50;
+    --error-bg: #f7ebe9;
+    --error-border: #d4a8a6;
+    --error-text: #8f3d3d;
+    --loading-bg: #f3f0ea;
+    --loading-border: #ddd7cc;
+    --loading-text: #5c5852;
     --scrollbar-track: #f1f1f1;
     --scrollbar-thumb: #c1c1c1;
     --scrollbar-thumb-hover: #a8a8a8;
@@ -71,7 +71,7 @@
 }
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    font-family: "Noto Serif SC", "Noto Serif JP", "Songti SC", "Hiragino Mincho ProN", serif;
     line-height: 1.6;
     overflow-wrap: anywhere;
     color: var(--text-primary);
@@ -100,8 +100,8 @@ body {
 .header h1 {
     font-size: 2.5rem;
     margin-bottom: 0.5rem;
-    font-weight: 700;
-    text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    font-weight: 500;
+    text-shadow: none;
 }
 
 .header p {
@@ -491,7 +491,7 @@ body {
     width: 100%;
     min-height: 44px;
     padding: 1rem 1.5rem;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: #c3272b;
     color: white;
     border: none;
     border-radius: 12px;
@@ -711,7 +711,7 @@ body {
     width: 20px;
     height: 20px;
     border: 2px solid #f3f3f3;
-    border-top: 2px solid #667eea;
+    border-top: 2px solid #2f5d50;
     border-radius: 50%;
     animation: spin 1s linear infinite;
     margin-right: 0.5rem;
