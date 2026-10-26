@@ -380,28 +380,27 @@ def _build_page_html(
     <title>{page_title}</title>
     <meta name="description" content="{og_desc}">
     <meta name="robots" content="noindex">
-    <meta name="theme-color" content="#667eea">
+    <meta name="theme-color" content="#fafaf7">
     <meta property="og:title" content="{page_title}">
     <meta property="og:description" content="{og_desc}">
     <meta property="og:type" content="article">
     <meta property="og:locale" content="{og_loc}">
-    <meta property="og:site_name" content="Video Transcript API">
+    <meta property="og:site_name" content="阅稿">
     <style>
         body {{
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
-                         "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
-            line-height: 1.8;
-            color: #333;
-            max-width: 800px;
+            font-family: "Noto Serif SC", "Noto Serif JP", "Songti SC", serif;
+            line-height: 2;
+            color: #1a1a18;
+            max-width: 40rem;
             margin: 0 auto;
             padding: 32px 20px;
-            background: #fafafa;
+            background: #fafaf7;
         }}
         article {{
-            background: #fff;
-            border-radius: 8px;
-            box-shadow: 0 1px 8px rgba(0,0,0,0.06);
-            padding: 40px;
+            background: transparent;
+            border-radius: 0;
+            box-shadow: none;
+            padding: 8px 12px 32px;
         }}
         h1 {{
             font-size: 1.5rem;
@@ -415,19 +414,19 @@ def _build_page_html(
             padding-bottom: 16px;
             border-bottom: 1px solid #e5e7eb;
         }}
-        .meta a {{ color: #667eea; text-decoration: none; }}
+        .meta a {{ color: #2f5d50; text-decoration: none; }}
         .meta a:hover {{ text-decoration: underline; }}
-        .content {{ font-size: 1rem; }}
+        .content {{ font-size: 0.95rem; text-align: center; }}
         .content h1 {{ font-size: 1.3rem; }}
         .content h2 {{ font-size: 1.15rem; }}
         .content h3 {{ font-size: 1.05rem; }}
         .content p {{ margin: 0.8em 0; }}
         .content blockquote {{
-            border-left: 3px solid #667eea;
+            border-left: 2px solid #e8e4dc;
             margin: 1em 0;
-            padding: 0.5em 1em;
-            color: #555;
-            background: #f8f9ff;
+            padding: 0.5em 1.1em;
+            color: #5c5852;
+            background: transparent;
         }}
         .content pre {{
             background: #f3f4f6;

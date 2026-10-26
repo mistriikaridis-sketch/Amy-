@@ -114,13 +114,13 @@ def test_language_en_switches_catalog(language_config):
 def test_config_load_rejects_unsupported_language(tmp_path):
     """An unsupported value fails at load time and lists the legal values."""
     config_path = tmp_path / "config.jsonc"
-    config_path.write_text(json.dumps({"language": "fr"}), encoding="utf-8")
+    config_path.write_text(json.dumps({"language": "it"}), encoding="utf-8")
 
     with pytest.raises(ValueError) as excinfo:
         load_config(config_path, use_cache=False)
 
     message = str(excinfo.value)
-    assert "'fr'" in message, message
+    assert "'it'" in message, message
     assert "zh-CN, en" in message, message
 
 
@@ -159,7 +159,7 @@ def test_non_object_config_root_keeps_its_own_error(tmp_path):
 
 def test_get_language_rejects_unsupported_language(language_config):
     """Even a mutated in-memory config cannot silently produce a wrong locale."""
-    language_config("fr")
+    language_config("it")
 
     with pytest.raises(ValueError) as excinfo:
         get_language()
@@ -284,7 +284,7 @@ def test_check_config_accepts_default_language(tmp_path):
 def test_check_config_rejects_unsupported_language(tmp_path):
     """The real startup preflight must fail and name the legal values."""
     config = _minimal_config(tmp_path)
-    config["language"] = "fr"
+    config["language"] = "it"
 
     result = _run_check_config(tmp_path, config)
 

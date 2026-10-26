@@ -6,7 +6,7 @@
   <title>阅稿 · 进阶</title>
   <meta name="theme-color" content="#fafaf7">
   <meta name="robots" content="noindex">
-  <link rel="stylesheet" href="/static/css/view-japanese-minimal.css?v=yg7">
+    <link rel="stylesheet" href="/static/css/view-japanese-minimal.css?v=yg10">
 </head>
 <body class="yg-help">
   <header class="yg-mast">
@@ -27,7 +27,7 @@
   <div class="wrap">
     <a class="back" href="/">← 返回首页</a>
     <h1>进阶说明</h1>
-    <p>普通用户请走首页三步：粘贴 / 开始 / 打开阅读页。下面给脚本与自建环境。</p>
+    <p>普通用户请走首页三步：粘贴链接 / 开始 / 打开阅读页。本产品只接受链接，不提供本地音视频上传。下面给脚本与自建环境。</p>
 
     <h2>1. 健康检查</h2>
     <pre>curl -s http://127.0.0.1:8200/livez
@@ -60,8 +60,8 @@ curl -s http://127.0.0.1:8200/health</pre>
     <ol>
       <li><strong>Path A</strong>：Amy（或其它工具）先出 Markdown/纯文本 → 导入 VTA → 打开 <code>/view/{token}</code>。</li>
       <li><strong>local_whisper</strong>：在 <code>config.jsonc</code> 启用 <code>local_whisper</code>，并用环境变量指定带 Whisper 的解释器：
-        <pre>LOCAL_WHISPER_PYTHON=C:\Path\to\python.exe
-AMY_PYTHON=C:\Path\to\Amy\venv\Scripts\python.exe</pre>
+        <pre>LOCAL_WHISPER_PYTHON=/path/to/python
+AMY_PYTHON=/path/to/venv/bin/python</pre>
         解析顺序：配置里的 <code>local_whisper.python</code> → <code>LOCAL_WHISPER_PYTHON</code> → <code>AMY_PYTHON</code> → 本机候选。
       </li>
       <li><strong>Path B（可选）</strong>：自建 CapsWriter / FunASR 后再走完整 URL 转写。</li>

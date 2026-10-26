@@ -1,8 +1,7 @@
 """Local Whisper ASR fallback when CapsWriter is unavailable.
 
-Uses a configured external Python that has faster-whisper or openai-whisper
-(Amy's interpreter on Ashley). Runs out-of-process so the VTA venv does not
-need whisper packages installed.
+Uses a configured external Python that has faster-whisper or openai-whisper.
+Runs out-of-process so this app's virtualenv does not need whisper packages.
 """
 
 from __future__ import annotations
@@ -167,12 +166,10 @@ def is_available(config: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
 
 
 def _default_python() -> str:
-    # Prefer Amy / system Python known to carry whisper on Ashley.
+    """Resolve a Whisper interpreter from config/env only. No machine-specific paths."""
     candidates = [
         os.environ.get("LOCAL_WHISPER_PYTHON") or "",
         os.environ.get("AMY_PYTHON") or "",
-        r"C:\Users\Ashley\AppData\Local\Programs\Python\Python314\python.exe",
-        r"C:\Users\Ashley\AppData\Local\hermes\hermes-agent\venv\Scripts\python.exe",
     ]
     for c in candidates:
         if c and Path(c).exists():

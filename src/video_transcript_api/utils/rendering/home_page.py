@@ -12,17 +12,16 @@ from ...i18n import LANGUAGE_DISPLAY_NAMES, SUPPORTED_LANGUAGES, get_ui_language
 APP_NAME = _os.environ.get("VTA_APP_NAME") or _os.environ.get("APP_NAME") or "阅稿"
 
 
-def _uploads_enabled() -> bool:
-    return (_os.environ.get("VTA_UPLOADS_ENABLED") or "").strip().lower() == "true"
-
-
 def render_home_html() -> str:
-    """Return the landing page HTML for the current UI language."""
+    """Return the landing page HTML for the current UI language.
+
+    The open-source product accepts links only. Local upload copy is not shown
+    even if ``VTA_UPLOADS_ENABLED`` is set.
+    """
     lang = get_ui_language()
-    uploads = _uploads_enabled()
-    lead = t("web.home.lead_with_upload") if uploads else t("web.home.lead")
-    step1_title = t("web.home.step1_title_upload") if uploads else t("web.home.step1_title")
-    step1_desc = t("web.home.step1_desc_upload") if uploads else t("web.home.step1_desc")
+    lead = t("web.home.lead")
+    step1_title = t("web.home.step1_title")
+    step1_desc = t("web.home.step1_desc")
 
     options = []
     for code in SUPPORTED_LANGUAGES:
@@ -40,7 +39,7 @@ def render_home_html() -> str:
     <meta name="description" content="{t("web.home.meta_description")}">
     <meta name="theme-color" content="#fafaf7">
     <meta name="robots" content="noindex">
-    <link rel="stylesheet" href="/static/css/view-japanese-minimal.css?v=yg7">
+    <link rel="stylesheet" href="/static/css/view-japanese-minimal.css?v=yg10">
 </head>
 <body class="yg-home">
   <header class="yg-mast">

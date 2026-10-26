@@ -2,8 +2,8 @@
     // ============================================================
     // 界面与输出语言 / UI and output language
     // ============================================================
-    // 取值 "zh-CN" | "en"，缺省 "zh-CN"；其他值启动即失败。
-    // Accepted: zh-CN, en, ja, ko, es, fr, pt, de, ru, ar (see SUPPORTED_LANGUAGES); default zh-CN; others fail startup.
+    // 取值见 SUPPORTED_LANGUAGES，缺省 "zh-CN"；其他值启动即失败。
+    // Accepted: zh-CN, en, ja, ko, es, fr, pt, de, ru, ar; default zh-CN; others fail startup.
     // 控制 Web 界面文案，以及总结、详细笔记、章节等生成内容的输出语言。
     // Controls Web UI wording and the output language of generated content
     // (summary, detailed notes, chapters).
@@ -66,7 +66,7 @@
     // Uses an external Python that already has faster-whisper or openai-whisper (e.g. Amy).
     "local_whisper": {
         "enabled": true,
-        "python": "",                 // empty => LOCAL_WHISPER_PYTHON / AMY_PYTHON / Ashley defaults
+        "python": "",                 // empty => LOCAL_WHISPER_PYTHON / AMY_PYTHON
         "engine": "auto",             // auto | faster-whisper | openai-whisper
         "model": "tiny",              // tiny/base/small/... ; keep tiny for smoke
         "language": "zh",
