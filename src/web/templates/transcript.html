@@ -1,0 +1,1209 @@
+﻿{% extends "base.html" %}
+
+{% block title %}{{ title or t('web.viewer.transcript_title') }} - {{ t('web.viewer.default_title') }}{% endblock %}
+{% block meta_description %}{{ t('web.viewer.meta_result_desc', title=(title or t('web.viewer.transcript_title')), platform=(platform or '')) }}{% endblock %}
+{% block og_title %}{{ title or t('web.viewer.transcript_title') }} - {{ t('web.viewer.default_title') }}{% endblock %}
+{% block og_description %}{% if share_card %}{{ share_card.points[0] }}{% else %}{{ t('web.viewer.og_result_desc', title=(title or t('web.viewer.transcript_title'))) }}{% endif %}{% endblock %}
+{% block og_image_meta %}{% if share_card %}
+    <meta name="twitter:card" content="summary_large_image">
+    <meta property="og:image" content="{{ og_image_url }}">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta name="twitter:image:alt" content="{{ share_card.headline }}">
+{% endif %}{% endblock %}
+
+{% block header_actions %}
+{# Transcript page: fold owner actions into a gear menu; theme toggle stays outside. #}
+<details class="owner-menu" id="ownerMenu">
+    <summary class="owner-menu-summary" aria-label="{{ t('web.transcript.auth_owner_menu') }}">
+        <span class="owner-menu-icon" aria-hidden="true">⚙</span>
+    </summary>
+    <div class="owner-menu-panel">
+        <nav class="site-nav">
+            <a href="/add_task_by_web" class="site-nav-link">{{ t('web.nav.submit') }}</a>
+            <a href="/static/history.html?v={{ asset_v }}" class="site-nav-link">{{ t('web.nav.history') }}</a>
+        </nav>
+        {% if view_token %}
+        <div class="owner-menu-divider" role="separator"></div>
+        <div class="protected-action-auth-tools" aria-live="polite">
+            <button class="recalibrate-btn" id="protectedActionAuthChange" type="button">{{ t('web.transcript.auth_change') }}</button>
+            <button class="recalibrate-btn owner-menu-danger" id="protectedActionAuthClear" type="button">{{ t('web.transcript.auth_clear') }}</button>
+            <span id="protectedActionAuthStatus" class="dialog-status"></span>
+        </div>
+        {% endif %}
+    </div>
+</details>
+{% endblock %}
+
+{% block site_nav %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/floating-toc.css?v={{ asset_v }}&yg=tocrail4">
+<style>
+/* Section header with inline action */
+.section-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.section-header h2 { margin-bottom: 0; }
+
+/* Detailed-notes generation placeholders stay presentational until the task succeeds. */
+.notes-generation-skeleton { display: grid; gap: 16px; }
+.notes-generation-placeholder {
+    position: relative;
+    overflow: hidden;
+    min-height: 116px;
+    padding: 16px;
+    border: 1px solid var(--border-primary);
+    border-radius: 8px;
+    background: var(--bg-secondary, #f5f5f5);
+}
+.notes-generation-placeholder::after {
+    position: absolute;
+    inset: 0;
+    content: "";
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.45), transparent);
+    animation: notesGenerationShimmer 1.6s ease-in-out infinite;
+}
+.notes-generation-placeholder-title,
+.notes-generation-placeholder-time,
+.notes-generation-placeholder-line {
+    position: relative;
+    z-index: 1;
+    display: block;
+}
+.notes-generation-placeholder-title {
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+.notes-generation-placeholder-time {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--text-secondary, #666);
+    font-size: 0.85rem;
+}
+.notes-generation-placeholder-line {
+    height: 10px;
+    margin-top: 14px;
+    border-radius: 999px;
+    background: var(--border-primary);
+}
+.notes-generation-placeholder-line.short { width: 72%; }
+@keyframes notesGenerationShimmer {
+    to { transform: translateX(100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .notes-generation-placeholder::after { animation: none; }
+}
+
+.status-interrupted {
+    background: #fff8e1;
+    border-left: 4px solid #f9a825;
+    padding: 16px;
+    margin: 0;
+    border-radius: 4px;
+}
+.status-interrupted h2 { margin-top: 0; }
+.status-interrupted p { margin-bottom: 0; }
+.status-interrupted .interrupted-reason {
+    margin-top: 8px;
+    color: var(--text-secondary, #666);
+}
+.status-interrupted .interrupted-at {
+    margin-top: 8px;
+    color: var(--text-secondary, #666);
+    font-size: 0.85rem;
+}
+
+/* Recalibrate button */
+.recalibrate-btn {
+    background: var(--bg-secondary, #f5f5f5);
+    border: 1px solid var(--border-primary);
+    border-radius: 6px;
+    padding: 6px 14px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    min-height: 44px;
+    color: var(--text-primary, #333);
+    transition: background 0.2s;
+}
+.recalibrate-btn:hover { background: var(--bg-tertiary, #e8e8e8); }
+.recalibrate-btn:focus-visible,
+.dialog-btn:focus-visible,
+.recalibrate-dialog input:focus-visible {
+    outline: 3px solid var(--text-primary);
+    outline-offset: 2px;
+}
+.recalibrate-btn:disabled,
+.dialog-btn:disabled,
+.recalibrate-dialog input:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+/* Protected-action controls (now nested inside the owner gear menu). */
+.protected-action-auth-tools {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    margin: 24px 0;
+    padding: 12px 16px;
+    border: 1px solid var(--border-primary);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+}
+.protected-action-auth-tools .dialog-status { flex: 1 1 100%; margin-top: 0; }
+
+/* Owner gear menu in transcript header (details/summary, same pattern as export/LLM panels). */
+.owner-menu {
+    position: relative;
+    z-index: 5;
+    text-align: left;
+}
+.owner-menu-summary {
+    list-style: none;
+    cursor: pointer;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    background: rgba(255, 255, 255, 0.2);
+    backdrop-filter: blur(10px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--header-text);
+    font-size: 1.15rem;
+    user-select: none;
+    position: relative;
+    box-sizing: border-box;
+    transition: background 0.2s ease, transform 0.2s ease;
+}
+.owner-menu-summary::-webkit-details-marker { display: none; }
+.owner-menu-summary:hover { background: rgba(255, 255, 255, 0.3); transform: scale(1.05); }
+.owner-menu-summary:focus-visible {
+    outline: 3px solid var(--header-text);
+    outline-offset: 2px;
+}
+[data-theme="dark"] .owner-menu-summary {
+    background: rgba(0, 0, 0, 0.2);
+    border-color: rgba(0, 0, 0, 0.3);
+}
+[data-theme="dark"] .owner-menu-summary:hover { background: rgba(0, 0, 0, 0.3); }
+.owner-menu-panel {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    min-width: 220px;
+    max-width: min(280px, calc(100vw - 24px));
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px solid var(--border-primary);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+    box-sizing: border-box;
+}
+.owner-menu .site-nav,
+.owner-menu-nav {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 6px;
+    margin: 0;
+}
+.owner-menu .site-nav-link {
+    display: block;
+    text-align: left;
+    opacity: 1;
+    color: var(--text-primary);
+    border-color: var(--border-primary);
+    background: var(--bg-secondary);
+    padding: 8px 12px;
+    min-height: 40px;
+    box-sizing: border-box;
+    line-height: 1.4;
+}
+.owner-menu .site-nav-link:hover {
+    background: var(--bg-tertiary, #e8e8e8);
+}
+.owner-menu-divider {
+    height: 1px;
+    margin: 10px 0;
+    background: var(--border-primary);
+    border: 0;
+}
+.owner-menu .protected-action-auth-tools {
+    margin: 0;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+}
+.owner-menu .protected-action-auth-tools .recalibrate-btn {
+    width: 100%;
+    text-align: left;
+}
+.owner-menu-danger {
+    font-size: 0.8rem;
+    opacity: 0.72;
+    color: var(--text-secondary, #666);
+}
+.owner-menu-danger:hover { opacity: 1; }
+.owner-menu .protected-action-auth-tools .dialog-status {
+    width: 100%;
+    margin-top: 0;
+    font-size: 0.78rem;
+}
+
+/* Copy content button (shares base look with recalibrate button) */
+.copy-content-btn.copied {
+    border-color: #10b981;
+    background: rgba(16, 185, 129, 0.08);
+    color: #10b981;
+}
+
+/* Section header may hold multiple action buttons on the right side */
+.section-header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* Recalibrate dialog */
+.recalibrate-dialog {
+    border: none;
+    border-radius: 12px;
+    padding: 24px;
+    max-width: 420px;
+    width: 90%;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+.recalibrate-dialog::backdrop { background: rgba(0,0,0,0.4); }
+.recalibrate-dialog h3 { margin: 0 0 8px; font-size: 1.1rem; }
+.recalibrate-dialog .dialog-desc { margin: 0 0 16px; font-size: 0.85rem; color: var(--text-secondary, #666); }
+.recalibrate-dialog label { display: block; margin-bottom: 4px; font-size: 0.85rem; font-weight: 500; }
+.recalibrate-dialog input {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border-primary);
+    border-radius: 6px;
+    font-size: 0.9rem;
+    min-height: 44px;
+    box-sizing: border-box;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+.dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+}
+.dialog-btn {
+    padding: 7px 18px;
+    border-radius: 6px;
+    border: 1px solid var(--border-primary);
+    cursor: pointer;
+    font-size: 0.9rem;
+    min-height: 44px;
+}
+.dialog-btn-cancel { background: var(--bg-secondary, #f5f5f5); color: var(--text-primary, #333); }
+.dialog-btn-confirm { background: var(--bg-tertiary); color: var(--text-primary); border-color: var(--border-primary); }
+.dialog-btn-confirm:disabled { opacity: 0.6; cursor: not-allowed; }
+.dialog-status { margin-top: 12px; font-size: 0.82rem; color: var(--text-secondary, #666); }
+.dialog-status-error { color: #d9534f; }
+.dialog-status-ok { color: #5cb85c; }
+
+@media (max-width: 480px) {
+    .protected-action-auth-tools {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .protected-action-auth-tools .recalibrate-btn,
+    .protected-action-auth-tools .dialog-status {
+        width: 100%;
+    }
+    .dialog-actions { justify-content: stretch; }
+    .dialog-actions .dialog-btn { flex: 1 1 120px; flex-shrink: 0; }
+}
+
+/* Inline recalibrate status (replaces button during processing) */
+.recalibrate-status { font-size: 0.85rem; color: var(--text-secondary, #888); }
+.recalibrate-done { color: #5cb85c; }
+.recalibrate-error { color: #d9534f; }
+
+/* Speaker attribution observability badges */
+.speaker-risk-warning {
+    margin: 0 0 14px;
+    padding: 10px 14px;
+    border: 1px solid #f59e0b;
+    border-radius: 8px;
+    background: #fffbeb;
+    color: #92400e;
+    font-weight: 600;
+}
+.speaker-status-badge,
+.speaker-override-status {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 0.72em;
+    font-weight: 600;
+    vertical-align: middle;
+}
+.speaker-pending,
+.speaker-override-suspect { background: #fef3c7; color: #92400e; }
+.speaker-override-confirmed { background: #d1fae5; color: #065f46; }
+
+/* Summary compression guidance is informational, not a quality failure. */
+.summary-condensation-hint {
+    margin: 0;
+    padding: 8px 30px;
+    border-bottom: 1px solid var(--border-primary);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+@media (max-width: 768px) {
+    .summary-condensation-hint { padding: 8px 20px; }
+}
+@media (max-width: 480px) {
+    .summary-condensation-hint { padding: 8px 15px; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+    {% if status == 'interrupted' %}
+    <div class="section" id="interrupted-banner">
+        <div class="status-interrupted" role="status">
+            <h2>{{ t('web.transcript.interrupted_heading') }}</h2>
+            <p>{{ t('web.transcript.interrupted_body') }}</p>
+            {% if interrupted_reason %}
+            <p class="interrupted-reason">{{ t('web.transcript.interrupted_reason', reason=interrupted_reason) }}</p>
+            {% endif %}
+            {% if interrupted_at %}
+            <p class="interrupted-at">{{ t('web.transcript.interrupted_at', time=interrupted_at) }}</p>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- 统计信息（单行显示） -->
+    {% set original_length = stats.get('original_length', 0) if stats else 0 %}
+    {% set calibrated_length = stats.get('calibrated_length', 0) if stats else 0 %}
+    {% set summary_length = stats.get('summary_length', 0) if stats else 0 %}
+    {% set notes_length = stats.get('notes_length', 0) if stats else 0 %}
+    {% set summary_percentage = (summary_length / original_length * 100)|round(1) if original_length > 0 and summary_length > 0 else 0 %}
+    {% set has_readable_notes = notes_html is defined and notes_html %}
+    {% set show_summary_stats = original_length > 0 and summary_length > 0 and summary_length != calibrated_length and summary_state != 'skipped_short' %}
+    {% if original_length > 0 %}
+    <div class="stats-line">
+        <span class="stats-label">{{ t('web.transcript.stats_label') }}</span>
+        <span class="stats-content">
+            {{ t('web.transcript.stats_original', n="{:,}".format(original_length)) }}
+            {% if calibrated_length > 0 %}{{ t('web.transcript.stats_calibrated', n="{:,}".format(calibrated_length)) }}{% endif %}{% if summary_state == 'skipped_short' and summary_length > 0 %}{{ t('web.transcript.stats_skipped_short') }}{% elif show_summary_stats %}{{ t('web.transcript.stats_summary', n="{:,}".format(summary_length), pct="%.1f"|format(summary_percentage)) }}{% endif %}
+            {% if notes_length > 0 %}{{ t('web.transcript.stats_notes', n="{:,}".format(notes_length)) }}{% endif %}
+        </span>
+    </div>
+    {% if show_summary_stats and summary_percentage <= 20 and summary_state == 'generated' %}
+    <div class="summary-condensation-hint" role="note">
+        {{ t('web.transcript.condensed') }}{% if has_readable_notes %}{{ t('web.transcript.condensed_suggest_notes') }}{% else %}{{ t('web.transcript.condensed_suggest_generate') }}{% endif %}
+    </div>
+    {% endif %}
+    {% endif %}
+
+    <!-- 校准质量警告：以 stats.calibration_status（full/partial/none）为准，
+         两条校对路径（纯文本 segment 口径 / 说话人结构化 chunk 口径）统一在此渲染，
+         不再只有结构化路径才能出警告。disabled（用户主动关闭校对）不算异常，
+         走独立的信息提示条（见下方「校对文本」区块顶部），不在这里出警告。 -->
+    {% if stats and stats.calibration_status and stats.calibration_status not in ('full', 'disabled') %}
+    {% set cal = stats.calibration_stats %}
+    {% if stats.calibration_status == 'none' %}
+    <div class="calibration-warning paper-callout">
+        <span>&#x26A0;&#xFE0F;</span>
+        <span><strong>{{ t('web.transcript.cal_failed') }}</strong>{{ t('web.punct.colon') }}{{ t('web.transcript.cal_failed_body') }}</span>
+    </div>
+    {% elif stats.calibration_status == 'partial' %}
+    <div class="calibration-warning paper-callout">
+        <span>&#x26A0;&#xFE0F;</span>
+        <span><strong>{{ t('web.transcript.cal_partial') }}</strong>{{ t('web.punct.colon') }}
+        {%- if cal and cal.total_chunks is defined %}
+            {{ t('web.transcript.cal_partial_chunks', success=cal.success_count, total=cal.total_chunks, fallback=cal.fallback_count, failed=cal.failed_count) }}
+        {%- elif cal and cal.total_segments is defined %}
+            {{ t('web.transcript.cal_partial_segments', success=cal.calibrated_segments, total=cal.total_segments, fallback=cal.fallback_segments) }}{% if cal.low_quality_segments %}{{ t('web.transcript.cal_partial_low_quality', n=cal.low_quality_segments) }}{% endif %}{{ t('web.punct.period') }}
+        {%- endif %}
+        {{ t('web.transcript.cal_partial_typos') }}</span>
+    </div>
+    {% endif %}
+    {% endif %}
+
+    <!-- 模型配置信息（折叠展示） -->
+    {% if llm_config %}
+    <details class="llm-config-details yg-chrome-quiet">
+        <summary>
+            <span class="config-label">{{ t('web.transcript.config_label') }}</span>
+            {% if llm_config.has_risk %}<span class="risk-badge">{{ t('web.transcript.risk_badge') }}</span>{% endif %}
+        </summary>
+        <div class="llm-config-grid">
+            {% if llm_config.calibrate_model %}
+            <div class="config-item">
+                <span class="config-key">{{ t('web.transcript.model_calibrate') }}</span>
+                <span class="config-value">{{ llm_config.calibrate_model }}{% if llm_config.calibrate_reasoning_effort %} <span class="reasoning-tag">reasoning: {{ llm_config.calibrate_reasoning_effort }}</span>{% endif %}</span>
+            </div>
+            {% endif %}
+            {% if llm_config.summary_model %}
+            <div class="config-item">
+                <span class="config-key">{{ t('web.transcript.model_summary') }}</span>
+                <span class="config-value">{{ llm_config.summary_model }}{% if llm_config.summary_reasoning_effort %} <span class="reasoning-tag">reasoning: {{ llm_config.summary_reasoning_effort }}</span>{% endif %}</span>
+            </div>
+            {% endif %}
+        </div>
+    </details>
+    {% endif %}
+
+    <!-- 一键复制常用链接 -->
+    {% if view_token %}
+    <div class="quick-copy-bar yg-chrome-hide" hidden>
+        <button class="quick-copy-btn" data-path="/view/{{ view_token }}?raw=calibrated&amp;lang={{ ui_language }}" title="{{ t('web.transcript.copy_raw_title') }}">
+            <span class="quick-copy-label">{{ t('web.transcript.copy_raw_label') }}</span>
+            <span class="quick-copy-action">{{ t('web.transcript.copy_url') }}</span>
+            <span class="quick-copy-desc">{{ t('web.transcript.copy_raw_desc') }}</span>
+        </button>
+        <button class="quick-copy-btn" data-path="/view/{{ view_token }}?page=calibrated&amp;lang={{ ui_language }}" title="{{ t('web.transcript.copy_html_title') }}">
+            <span class="quick-copy-label">{{ t('web.transcript.copy_html_label') }}</span>
+            <span class="quick-copy-action">{{ t('web.transcript.copy_url') }}</span>
+            <span class="quick-copy-desc">{{ t('web.transcript.copy_html_desc') }}</span>
+        </button>
+        {% if summary_html %}
+        <button class="quick-copy-btn share-summary-btn" type="button" title="{{ t('web.transcript.share_title') }}">
+            <span class="quick-copy-label">{{ t('web.transcript.share_label') }}</span>
+            <span class="quick-copy-action">{{ t('web.transcript.share_action') }}</span>
+            <span class="quick-copy-desc">{{ t('web.transcript.share_desc') }}</span>
+        </button>
+        {% endif %}
+        {% if calibrated_html %}
+        {% for preset in deep_read_prompt_presets %}
+        <button class="quick-copy-btn deep-read-prompt-btn"
+                data-path="/view/{{ view_token }}?raw=calibrated&amp;lang={{ ui_language }}"
+                data-template='{{ preset.template|tojson|forceescape }}'
+                title="{% if preset.builtin %}{{ t('web.transcript.default_prompt_label') }}{% else %}{{ preset.label|forceescape }}{% endif %}">
+            <span class="quick-copy-label">{% if preset.builtin %}{{ t('web.transcript.default_prompt_label') }}{% else %}{{ preset.label|forceescape }}{% endif %}</span>
+            <span class="quick-copy-action">{{ t('web.transcript.copy_prompt') }}</span>
+            <span class="quick-copy-desc">{{ t('web.transcript.copy_prompt_desc') }}</span>
+        </button>
+        {% endfor %}
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- 导出链接栏 -->
+    {% if view_token %}
+    <details class="export-links-details yg-chrome-hide" hidden>
+        <summary class="export-links-summary">
+            <span class="export-summary-label">{{ t('web.transcript.export_more') }}</span>
+        </summary>
+        <div class="export-links-content">
+            <div class="export-group">
+                <span class="export-group-label">{{ t('web.transcript.export_raw_group') }}</span>
+                <span class="export-group-items">
+                    <a href="/view/{{ view_token }}?raw=calibrated&amp;lang={{ ui_language }}" title="{{ t('web.transcript.export_raw_calibrated_title') }}">{{ t('web.transcript.export_calibrated') }}</a>
+                    <span class="export-sep">·</span>
+                    <a href="/view/{{ view_token }}?raw=summary&amp;lang={{ ui_language }}" title="{{ t('web.transcript.export_raw_summary_title') }}">{{ t('web.transcript.export_summary') }}</a>
+                    {% if notes_html is defined and notes_html %}
+                    <span class="export-sep">·</span>
+                    <a href="/view/{{ view_token }}?raw=notes&amp;lang={{ ui_language }}" title="{{ t('web.transcript.export_raw_notes_title') }}">{{ t('web.transcript.export_notes') }}</a>
+                    {% endif %}
+                    <span class="export-sep">·</span>
+                    <a href="/view/{{ view_token }}?raw=transcript&amp;lang={{ ui_language }}" title="{{ t('web.transcript.export_raw_transcript_title') }}">{{ t('web.transcript.export_transcript') }}</a>
+                </span>
+                <span class="export-hint">{{ t('web.transcript.export_raw_hint') }}</span>
+            </div>
+            <div class="export-group">
+                <span class="export-group-label">{{ t('web.transcript.export_html_group') }}</span>
+                <span class="export-group-items">
+                    <a href="/view/{{ view_token }}?page=calibrated&amp;lang={{ ui_language }}" title="{{ t('web.transcript.export_page_calibrated_title') }}">{{ t('web.transcript.export_calibrated') }}</a>
+                    <span class="export-sep">·</span>
+                    <a href="/view/{{ view_token }}?page=summary&amp;lang={{ ui_language }}" title="{{ t('web.transcript.export_page_summary_title') }}">{{ t('web.transcript.export_summary') }}</a>
+                    {% if notes_html is defined and notes_html %}
+                    <span class="export-sep">·</span>
+                    <a href="/view/{{ view_token }}?page=notes&amp;lang={{ ui_language }}" title="{{ t('web.transcript.export_page_notes_title') }}">{{ t('web.transcript.export_notes') }}</a>
+                    {% endif %}
+                    <span class="export-sep">·</span>
+                    <a href="/view/{{ view_token }}?page=transcript&amp;lang={{ ui_language }}" title="{{ t('web.transcript.export_page_transcript_title') }}">{{ t('web.transcript.export_transcript') }}</a>
+                </span>
+                <span class="export-hint">{{ t('web.transcript.export_html_hint') }}</span>
+            </div>
+        </div>
+    </details>
+    {% endif %}
+
+    <div class="section" id="summary-section" data-section="summary">
+        <div class="section-header">
+            <h2>{{ t('web.transcript.section_summary_plain') }}</h2>
+            {% if summary_html %}
+            <div class="section-header-actions">
+                <button class="recalibrate-btn copy-content-btn" type="button" data-copy-target="summary-content-block" title="{{ t('web.transcript.copy_summary_title') }}">{{ t('web.transcript.copy_content') }}</button>
+            </div>
+            {% endif %}
+        </div>
+        <div class="content" id="summary-content-block">
+            {% if summary_html %}
+                {{ summary_html|safe }}
+            {% elif summary_state == 'failed' %}
+                <p style="color: #991b1b; font-style: italic;">{{ t('web.transcript.summary_failed') }}</p>
+                {% if view_token %}
+                <span id="resummarizeArea">
+                    <button class="recalibrate-btn" id="resummarizeBtn" type="button" data-protected-action="resummarize">{{ t('web.transcript.resummarize') }}</button>
+                </span>
+                {% endif %}
+            {% elif summary_state == 'skipped_short' %}
+                <p style="color: var(--text-secondary); font-style: italic;">{{ t('web.transcript.skipped_short') }}</p>
+            {% elif summary_state == 'disabled' %}
+                <p style="color: var(--text-secondary); font-style: italic;">{{ t('web.transcript.summary_disabled') }}</p>
+            {% else %}
+                {# summary_state == 'pending'，或旧数据缺失该字段时的兜底 #}
+                <p style="color: var(--text-secondary); font-style: italic;">{{ t('web.transcript.summary_pending') }}</p>
+            {% endif %}
+        </div>
+
+    </div>
+
+    {% if notes_html is defined and notes_html %}
+    <details class="section notes-section" id="notes-section" data-section="notes" open>
+        <summary class="section-header">
+            <h2>{{ t('web.transcript.section_notes_plain') }}</h2>
+            <span class="section-header-actions">
+                <button class="recalibrate-btn copy-content-btn" type="button" data-copy-target="notes-content-block" title="{{ t('web.transcript.copy_notes_title') }}">{{ t('web.transcript.copy_content') }}</button>
+            </span>
+        </summary>
+        <div class="content" id="notes-content-block">
+            {{ notes_html|safe }}
+        </div>
+    </details>
+    {% elif stats and stats.get('chapters_status') == 'generated' %}
+    <div class="section" id="notes-generation-section" data-section="notes">
+        <div class="section-header">
+            <h2>{{ t('web.transcript.section_notes_plain') }}</h2>
+            <span id="notesGenerationCount" role="status" aria-live="polite"></span>
+            <span id="notesGenerationProgress" role="status" aria-live="polite"></span>
+            {% if view_token %}
+            <span id="generateNotesArea">
+                <button class="recalibrate-btn" id="generateNotesBtn" type="button" data-protected-action="generate_notes">
+                    {% if notes_state|default(None) == 'failed' %}{{ t('web.transcript.notes_failed_retry') }}{% else %}{{ t('web.transcript.notes_generate') }}{% endif %}
+                </button>
+            </span>
+            {% endif %}
+        </div>
+        <div class="content" id="notes-generation-content">
+            {% if notes_state|default(None) == 'failed' %}
+            <p style="color: #991b1b; font-style: italic;">{{ t('web.transcript.notes_failed') }}</p>
+            {% else %}
+            <p style="color: var(--text-secondary); font-style: italic;">{{ t('web.transcript.notes_hint') }}</p>
+            {% endif %}
+        </div>
+
+    </div>
+    {% endif %}
+
+    {% if chapters_data %}
+    <script type="application/json" id="chapters-data">{{ chapters_data|safe }}</script>
+    {% endif %}
+
+    {% if calibrated_html %}
+    <div class="section" id="calibrated-section" data-section="calibrated">
+        <div class="section-header">
+            <h2>{{ t('web.transcript.section_calibrated_plain') }}</h2>
+            <div class="section-header-actions">
+                <button class="recalibrate-btn copy-content-btn" type="button" data-copy-target="calibrated-content-block" title="{{ t('web.transcript.copy_calibrated_title') }}">{{ t('web.transcript.copy_content') }}</button>
+                {% if view_token %}
+                <span id="recalibrateArea">
+                    <button class="recalibrate-btn" id="recalibrateBtn" type="button" data-protected-action="recalibrate">{{ t('web.transcript.recalibrate') }}</button>
+                </span>
+                {% endif %}
+            </div>
+        </div>
+        {% if stats and stats.calibration_status == 'disabled' %}
+        <div class="calibration-warning paper-callout">
+            <span>&#x2139;&#xFE0F;</span>
+            <span>{{ t('web.transcript.calibration_disabled') }}{% if use_speaker_recognition %}{{ t('web.transcript.calibration_disabled_speakers') }}{% endif %}{{ t('web.punct.period') }}</span>
+        </div>
+        {% endif %}
+        {% if use_speaker_recognition %}
+            <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 20px;">
+                {{ t('web.transcript.speaker_ai_hint') }}
+            </p>
+        {% endif %}
+        <div class="content" id="calibrated-content-block">
+            {{ calibrated_html|safe }}
+        </div>
+
+    </div>
+    {% endif %}
+
+    {% if view_token %}
+    <dialog id="protectedActionAuthDialog" class="recalibrate-dialog"
+            aria-labelledby="protectedActionAuthTitle"
+            aria-describedby="protectedActionAuthDescription">
+        <form id="protectedActionAuthForm">
+            <h3 id="protectedActionAuthTitle">{{ t('web.transcript.auth_title') }}</h3>
+            <p id="protectedActionAuthDescription" class="dialog-desc">{{ t('web.transcript.auth_desc') }}</p>
+            <label for="protectedActionTokenInput">{{ t('web.transcript.auth_label') }}</label>
+            <input type="password" id="protectedActionTokenInput" placeholder="{{ t('web.transcript.auth_placeholder') }}" autocomplete="off">
+            <div class="dialog-actions">
+                <button type="button" class="dialog-btn dialog-btn-cancel" id="protectedActionAuthCancel">{{ t('web.transcript.auth_cancel') }}</button>
+                <button type="submit" class="dialog-btn dialog-btn-confirm" id="protectedActionAuthSubmit">{{ t('web.transcript.auth_confirm') }}</button>
+            </div>
+            <p id="protectedActionAuthDialogStatus" class="dialog-status dialog-status-error" role="alert"></p>
+        </form>
+    </dialog>
+    {% endif %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="/static/js/floating-toc.js?v={{ asset_v }}"></script>
+{% if view_token %}
+<script src="/static/js/transcript-protected-action.js?v={{ asset_v }}"></script>
+<script>
+(function installTranscriptProtectedActions() {
+    'use strict';
+
+    var transcriptViewToken = {{ view_token|tojson }};
+    var authStorage = window.VideoTranscriptAuthStorage;
+    var protectedActionApi = window.VideoTranscriptProtectedAction;
+    var authDialog = document.getElementById('protectedActionAuthDialog');
+    var authForm = document.getElementById('protectedActionAuthForm');
+    var authInput = document.getElementById('protectedActionTokenInput');
+    var authCancel = document.getElementById('protectedActionAuthCancel');
+    var authChange = document.getElementById('protectedActionAuthChange');
+    var authClear = document.getElementById('protectedActionAuthClear');
+    var authStatus = document.getElementById('protectedActionAuthStatus');
+    var reloadScheduled = false;
+    var activePrompt = null;
+    var promptTrigger = null;
+    var actionDefinitions = {
+        'recalibrate': { buttonId: 'recalibrateBtn', areaId: 'recalibrateArea', running: window.t('web.transcript.running_recalibrate') },
+        'resummarize': { buttonId: 'resummarizeBtn', areaId: 'resummarizeArea', running: window.t('web.transcript.running_resummarize') },
+        'generate_notes': { buttonId: 'generateNotesBtn', areaId: 'generateNotesArea', running: window.t('web.transcript.running_notes') }
+    };
+    var notesGenerationStartedAt = null;
+    var notesGenerationState = null;
+
+    function localNow() {
+        return window.Date.now();
+    }
+
+    function notesGenerationElements() {
+        var section = document.getElementById('notes-generation-section');
+        var content = document.getElementById('notes-generation-content');
+        if (!section || !content) return null;
+        var counter = document.getElementById('notesGenerationCount');
+        var progress = document.getElementById('notesGenerationProgress');
+        if (!counter || !progress) {
+            var header = section.querySelector('.section-header');
+            if (!header) return null;
+            if (!counter) {
+                counter = document.createElement('span');
+                counter.id = 'notesGenerationCount';
+                counter.setAttribute('role', 'status');
+                counter.setAttribute('aria-live', 'polite');
+                header.appendChild(counter);
+            }
+            if (!progress) {
+                progress = document.createElement('span');
+                progress.id = 'notesGenerationProgress';
+                progress.setAttribute('role', 'status');
+                progress.setAttribute('aria-live', 'polite');
+                header.appendChild(progress);
+            }
+        }
+        return { section: section, content: content, counter: counter, progress: progress };
+    }
+
+    function readNotesChapters() {
+        var dataNode = document.getElementById('chapters-data');
+        if (!dataNode || typeof dataNode.textContent !== 'string') return null;
+        try {
+            var parsed = JSON.parse(dataNode.textContent);
+            if (!Array.isArray(parsed)) return null;
+            return parsed.map(function(chapter) {
+                return chapter && typeof chapter === 'object' && !Array.isArray(chapter) ? chapter : {};
+            });
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function formatChapterStartTime(seconds) {
+        if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return '';
+        var total = Math.floor(seconds);
+        var hours = Math.floor(total / 3600);
+        var remainder = total % 3600;
+        var minutes = Math.floor(remainder / 60);
+        var secondsPart = remainder % 60;
+        var paddedMinutes = String(minutes).padStart(2, '0');
+        var paddedSeconds = String(secondsPart).padStart(2, '0');
+        return hours > 0 ? hours + ':' + paddedMinutes + ':' + paddedSeconds : paddedMinutes + ':' + paddedSeconds;
+    }
+
+    function formatNotesElapsed(startedAt) {
+        var elapsedMs = localNow() - startedAt;
+        if (!Number.isFinite(elapsedMs) || elapsedMs < 0) elapsedMs = 0;
+        var totalSeconds = Math.floor(elapsedMs / 1000);
+        var minutes = Math.floor(totalSeconds / 60);
+        var seconds = String(totalSeconds % 60).padStart(2, '0');
+        return minutes + ':' + seconds;
+    }
+
+    function readNotesProgress(body) {
+        var progress = body && body.data && body.data.progress;
+        if (!progress || typeof progress.done !== 'number' || typeof progress.total !== 'number') return null;
+        if (!Number.isFinite(progress.done) || !Number.isFinite(progress.total)) return null;
+        if (!Number.isInteger(progress.done) || !Number.isInteger(progress.total)) return null;
+        if (progress.done < 0 || progress.total <= 0 || progress.done > progress.total) return null;
+        return progress;
+    }
+
+    function updateNotesGenerationProgress(body) {
+        if (notesGenerationStartedAt === null) return;
+        var progressElement = notesGenerationState
+            ? notesGenerationState.progress
+            : document.getElementById('notesGenerationProgress');
+        if (!progressElement) return;
+        var progress = readNotesProgress(body);
+        var message = progress
+            ? window.t('web.transcript.notes_progress', {done: progress.done, total: progress.total, elapsed: formatNotesElapsed(notesGenerationStartedAt)})
+            : window.t('web.transcript.notes_progress_no_total', {elapsed: formatNotesElapsed(notesGenerationStartedAt)});
+        progressElement.textContent = message;
+        if (progress && notesGenerationState) {
+            notesGenerationState.counter.textContent = window.t('web.transcript.notes_counter', {done: progress.done, total: progress.total});
+        }
+    }
+
+    function removeNotesGenerationSkeleton(preserveStartedAt) {
+        var state = notesGenerationState;
+        notesGenerationState = null;
+        if (!preserveStartedAt) notesGenerationStartedAt = null;
+        if (!state) {
+            try {
+                var progress = document.getElementById('notesGenerationProgress');
+                var counter = document.getElementById('notesGenerationCount');
+                if (progress) progress.textContent = '';
+                if (counter) counter.textContent = '';
+            } catch (error) {
+                // Cleanup is best effort when the page DOM is already unavailable.
+            }
+            return;
+        }
+        try {
+            // Restore live DOM nodes (DocumentFragment is emptied after appendChild).
+            state.content.textContent = '';
+            state.content.appendChild(state.originalContentFragment);
+            state.counter.textContent = '';
+            state.progress.textContent = '';
+            state.section.removeAttribute('aria-busy');
+        } catch (error) {
+            // Cleanup is best effort when the page DOM is already unavailable.
+        }
+    }
+
+    function renderNotesGenerationSkeleton() {
+        var elements = notesGenerationElements();
+        var chapters = readNotesChapters();
+        if (!elements || !chapters) return false;
+        // Keep original content as live DOM nodes (no innerHTML serialization).
+        var originalContentFragment = notesGenerationState
+            ? notesGenerationState.originalContentFragment
+            : null;
+        try {
+            // Re-render restores originals into content and empties the fragment;
+            // first render leaves content untouched. Re-capture nodes either way.
+            removeNotesGenerationSkeleton(true);
+            if (!originalContentFragment) {
+                originalContentFragment = document.createDocumentFragment();
+            }
+            while (elements.content.firstChild) {
+                originalContentFragment.appendChild(elements.content.firstChild);
+            }
+            var skeleton = document.createElement('div');
+            skeleton.className = 'notes-generation-skeleton';
+            skeleton.setAttribute('aria-hidden', 'true');
+            chapters.forEach(function(chapter) {
+                var placeholder = document.createElement('article');
+                placeholder.className = 'notes-generation-placeholder';
+                placeholder.setAttribute('aria-hidden', 'true');
+                var title = document.createElement('div');
+                title.className = 'notes-generation-placeholder-title';
+                title.textContent = typeof chapter.title === 'string' ? chapter.title : '';
+                var time = document.createElement('div');
+                time.className = 'notes-generation-placeholder-time';
+                time.textContent = formatChapterStartTime(chapter.start_time);
+                var line = document.createElement('span');
+                line.className = 'notes-generation-placeholder-line';
+                var shortLine = document.createElement('span');
+                shortLine.className = 'notes-generation-placeholder-line short';
+                placeholder.appendChild(title);
+                placeholder.appendChild(time);
+                placeholder.appendChild(line);
+                placeholder.appendChild(shortLine);
+                skeleton.appendChild(placeholder);
+            });
+            elements.content.textContent = '';
+            elements.content.appendChild(skeleton);
+            notesGenerationState = {
+                section: elements.section,
+                content: elements.content,
+                counter: elements.counter,
+                progress: elements.progress,
+                originalContentFragment: originalContentFragment,
+            };
+            elements.counter.textContent = window.t('web.transcript.notes_counter', {done: 0, total: chapters.length});
+            elements.section.setAttribute('aria-busy', 'true');
+            updateNotesGenerationProgress();
+            return true;
+        } catch (error) {
+            if (notesGenerationState) {
+                removeNotesGenerationSkeleton(true);
+            } else {
+                elements.content.textContent = '';
+                if (originalContentFragment) {
+                    elements.content.appendChild(originalContentFragment);
+                }
+                elements.counter.textContent = '';
+                elements.progress.textContent = '';
+                elements.section.removeAttribute('aria-busy');
+            }
+            return false;
+        }
+    }
+
+    function createNotesGenerationCallbacks(elements, originalLabel) {
+        return {
+            onAccepted: function() {
+                notesGenerationStartedAt = localNow();
+                try {
+                    if (!renderNotesGenerationSkeleton()) {
+                        console.error('Notes skeleton render failed, falling back to text progress');
+                    }
+                } catch (error) {
+                    console.error('Notes skeleton render failed, falling back to text progress');
+                }
+            },
+            onPoll: function(body) {
+                try {
+                    updateNotesGenerationProgress(body);
+                } catch (error) {
+                    // The controller isolates this callback if the DOM changes mid-poll.
+                }
+            }
+        };
+    }
+
+    function setAuthStatus(message, isError) {
+        if (!authStatus) return;
+        authStatus.textContent = message || '';
+        authStatus.className = isError ? 'dialog-status dialog-status-error' : 'dialog-status dialog-status-ok';
+    }
+
+    function actionElements(definition) {
+        return {
+            button: document.getElementById(definition.buttonId),
+            area: document.getElementById(definition.areaId)
+        };
+    }
+
+    function setActionStatus(elements, message, className) {
+        if (!elements.area) return;
+        elements.area.textContent = '';
+        var status = document.createElement('span');
+        status.className = className || 'recalibrate-status';
+        status.textContent = message;
+        elements.area.appendChild(status);
+    }
+
+    function restoreActionButton(elements, originalLabel, message) {
+        if (!elements.area || !elements.button) return;
+        var restoreFocus = elements.button === document.activeElement;
+        elements.area.textContent = '';
+        if (message) {
+            var status = document.createElement('span');
+            status.className = 'recalibrate-status recalibrate-error';
+            status.textContent = message;
+            elements.area.appendChild(status);
+        }
+        elements.button.disabled = false;
+        elements.button.textContent = originalLabel;
+        elements.area.appendChild(elements.button);
+        elements.area.removeAttribute('aria-busy');
+        if (restoreFocus && typeof elements.button.focus === 'function') elements.button.focus();
+    }
+
+    function disableProtectedActionButtons() {
+        var buttons = document.querySelectorAll('[data-protected-action]');
+        for (var index = 0; index < buttons.length; index += 1) buttons[index].disabled = true;
+    }
+
+    function enableProtectedActionButtons() {
+        var buttons = document.querySelectorAll('[data-protected-action]');
+        for (var index = 0; index < buttons.length; index += 1) buttons[index].disabled = false;
+    }
+
+    function closeAuthDialog() {
+        if (!authDialog) return;
+        if (typeof authDialog.close === 'function' && authDialog.open) authDialog.close();
+        else authDialog.removeAttribute('open');
+    }
+
+    function openAuthDialog() {
+        if (!authDialog) return;
+        if (typeof authDialog.showModal === 'function') {
+            try { authDialog.showModal(); } catch (error) { authDialog.setAttribute('open', ''); }
+        } else {
+            authDialog.setAttribute('open', '');
+        }
+    }
+
+    function promptForToken() {
+        if (activePrompt) return activePrompt.promise;
+        var previousFocus = promptTrigger || document.activeElement;
+        activePrompt = {};
+        activePrompt.promise = new Promise(function(resolve, reject) {
+            var settled = false;
+            function finish(error, token) {
+                if (settled) return;
+                settled = true;
+                authForm.removeEventListener('submit', onSubmit);
+                authCancel.removeEventListener('click', onCancel);
+                authDialog.removeEventListener('cancel', onCancel);
+                closeAuthDialog();
+                activePrompt = null;
+                var focusTarget = promptTrigger || previousFocus;
+                promptTrigger = null;
+                if (focusTarget && typeof focusTarget.focus === 'function') {
+                    var wasDisabled = focusTarget.disabled;
+                    focusTarget.disabled = false;
+                    focusTarget.focus();
+                    focusTarget.disabled = wasDisabled;
+                }
+                if (error) reject(error); else resolve(token);
+            }
+            function onSubmit(event) {
+                event.preventDefault();
+                var token = authInput.value.trim();
+                if (!token) {
+                    authInput.focus();
+                    var dialogStatus = document.getElementById('protectedActionAuthDialogStatus');
+                    if (dialogStatus) dialogStatus.textContent = window.t('web.transcript.auth_need_token');
+                    return;
+                }
+                finish(null, token);
+            }
+            function onCancel(event) {
+                if (event && typeof event.preventDefault === 'function') event.preventDefault();
+                finish(new Error('Protected action token prompt cancelled'));
+            }
+            authForm.addEventListener('submit', onSubmit);
+            authCancel.addEventListener('click', onCancel);
+            authDialog.addEventListener('cancel', onCancel);
+            authInput.value = '';
+            var dialogStatus = document.getElementById('protectedActionAuthDialogStatus');
+            if (dialogStatus) dialogStatus.textContent = '';
+            openAuthDialog();
+            window.setTimeout(function() { authInput.focus(); }, 0);
+        });
+        return activePrompt.promise;
+    }
+
+    function formatActionError(error) {
+        var message = error && error.message ? error.message : '';
+        if (message === 'Protected action token prompt cancelled') return '';
+        if (message === 'HTTP 403') return window.t('web.transcript.err_403');
+        if (message === 'HTTP 404') return window.t('web.transcript.err_404');
+        if (message === 'HTTP 409') return window.t('web.transcript.err_409');
+        if (message === 'POST network failure') return window.t('web.transcript.err_network');
+        if (message === 'HTTP 401 after one replay') return window.t('web.transcript.err_401_replay');
+        return message || window.t('web.transcript.err_generic');
+    }
+
+    function scheduleSafeReload() {
+        if (reloadScheduled) return;
+        reloadScheduled = true;
+        Object.keys(actionDefinitions).forEach(function(actionName) {
+            var elements = actionElements(actionDefinitions[actionName]);
+            if (elements.area && elements.button && elements.area.getAttribute('aria-busy') === 'true') {
+                setActionStatus(elements, window.t('web.transcript.done_refreshing'), 'recalibrate-status recalibrate-done');
+            }
+        });
+        window.setTimeout(function() { window.location.reload(); }, 500);
+    }
+
+    function disableProtectedActions() {
+        Object.keys(actionDefinitions).forEach(function(actionName) {
+            var elements = actionElements(actionDefinitions[actionName]);
+            if (elements.button) elements.button.disabled = true;
+        });
+        if (authChange) authChange.disabled = true;
+        if (authClear) authClear.disabled = true;
+        setAuthStatus(window.t('web.transcript.auth_module_failed'), true);
+    }
+
+    function initialiseProtectedActions() {
+        var authMethodsReady = authStorage &&
+            typeof authStorage.readAuthToken === 'function' &&
+            typeof authStorage.snapshotAuthToken === 'function' &&
+            typeof authStorage.buildAuthHeaders === 'function' &&
+            typeof authStorage.clearAuthTokenIfMatch === 'function' &&
+            typeof authStorage.writeAuthToken === 'function' &&
+            typeof authStorage.clearAuthToken === 'function';
+        if (!authMethodsReady || !protectedActionApi || typeof protectedActionApi.createProtectedActionController !== 'function') {
+            disableProtectedActions();
+            return;
+        }
+
+        var controller;
+        try {
+            controller = protectedActionApi.createProtectedActionController({
+                authStorage: authStorage,
+                promptToken: promptForToken,
+                onSuccess: scheduleSafeReload
+            });
+        } catch (error) {
+            disableProtectedActions();
+            return;
+        }
+
+        Object.keys(actionDefinitions).forEach(function(actionName) {
+            var definition = actionDefinitions[actionName];
+            var elements = actionElements(definition);
+            if (!elements.button || !elements.area) return;
+            var originalLabel = elements.button.textContent;
+            elements.button.addEventListener('click', function() {
+                if (document.querySelector('[data-protected-action]:disabled')) return;
+                disableProtectedActionButtons();
+                if (!activePrompt) promptTrigger = elements.button;
+                elements.area.setAttribute('aria-busy', 'true');
+                elements.button.textContent = definition.running;
+                var callbacks = actionName === 'generate_notes'
+                    ? createNotesGenerationCallbacks(elements, originalLabel)
+                    : null;
+                var actionPromise = callbacks
+                    ? controller.runProtectedAction(actionName, transcriptViewToken, callbacks)
+                    : controller.runProtectedAction(actionName, transcriptViewToken);
+                actionPromise.catch(function(error) {
+                    if (actionName === 'generate_notes') removeNotesGenerationSkeleton();
+                    restoreActionButton(elements, originalLabel, formatActionError(error));
+                    enableProtectedActionButtons();
+                });
+            });
+        });
+
+        authChange.addEventListener('click', function() {
+            if (!activePrompt) promptTrigger = authChange;
+            promptForToken().then(function(token) {
+                if (authStorage.writeAuthToken(token) === false) throw new Error('Protected action token save failed');
+                setAuthStatus(window.t('web.transcript.auth_updated'), false);
+            }).catch(function(error) {
+                if (error && error.message !== 'Protected action token prompt cancelled') setAuthStatus(formatActionError(error), true);
+            });
+        });
+        authClear.addEventListener('click', function() {
+            if (!authStorage.clearAuthToken()) {
+                setAuthStatus(window.t('web.transcript.auth_clear_failed'), true);
+                return;
+            }
+            setAuthStatus(window.t('web.transcript.auth_cleared'), false);
+        });
+    }
+
+    if (authDialog && authForm && authInput && authCancel) initialiseProtectedActions();
+})();
+</script>
+{% endif %}
+<script>
+/* Owner gear menu: close on outside click / Escape. */
+(function installOwnerMenu() {
+    'use strict';
+
+    var menu = document.getElementById('ownerMenu');
+    if (!menu) return;
+
+    function closeOwnerMenu() {
+        if (menu.open) menu.open = false;
+    }
+
+    document.addEventListener('click', function(event) {
+        if (!menu.open) return;
+        if (menu.contains(event.target)) return;
+        closeOwnerMenu();
+    });
+
+    document.addEventListener('keydown', function(event) {
+        if (event.key === 'Escape' || event.key === 'Esc') {
+            closeOwnerMenu();
+        }
+    });
+})();
+</script>
+{% if view_token and summary_html %}
+<script>
+/* Share summary text uses the canonical view page and the first summary paragraph. */
+(function installSummaryShareButton() {
+    'use strict';
+
+    var summaryShareTitle = {{ (title or t('web.viewer.transcript_title'))|tojson }};
+    var summaryShareOriginalUrl = {{ (url|default(""))|tojson }};
+    var summaryShareViewToken = {{ view_token|tojson }};
+
+    function readSummaryFirstParagraph() {
+        var summaryBlock = document.getElementById('summary-content-block');
+        if (!summaryBlock) return '';
+        var paragraph = summaryBlock.querySelector('p');
+        if (!paragraph) return '';
+        var paragraphText = paragraph.innerText || paragraph.textContent || '';
+        return paragraphText.trim();
+    }
+
+    function buildSummaryShareText() {
+        var shareLines = [summaryShareTitle || window.t('web.viewer.transcript_title')];
+        if (summaryShareOriginalUrl) {
+            shareLines.push(window.t('web.transcript.share_original', {url: summaryShareOriginalUrl}));
+        }
+        shareLines.push('', window.t('web.transcript.share_view', {url: window.location.origin + '/view/' + encodeURIComponent(summaryShareViewToken) + '?lang={{ ui_language }}'}));
+        var summaryParagraph = readSummaryFirstParagraph();
+        if (summaryParagraph) shareLines.push('', summaryParagraph);
+        return shareLines.join('\n');
+    }
+
+    function installSummaryShareClick() {
+        var shareButton = document.querySelector('.share-summary-btn');
+        if (!shareButton) return;
+        shareButton.addEventListener('click', function() {
+            if (shareButton.classList.contains('copied')) return;
+            var actionEl = shareButton.querySelector('.quick-copy-action');
+            var originalText = actionEl ? actionEl.textContent : '';
+            copyTextToClipboard(buildSummaryShareText(), function() {
+                shareButton.classList.add('copied');
+                if (actionEl) actionEl.textContent = window.t('web.copy.copied');
+                window.setTimeout(function() {
+                    shareButton.classList.remove('copied');
+                    if (actionEl) actionEl.textContent = originalText;
+                }, 1500);
+            });
+        });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', installSummaryShareClick);
+    } else {
+        installSummaryShareClick();
+    }
+})();
+</script>
+{% endif %}
+{% endblock %}

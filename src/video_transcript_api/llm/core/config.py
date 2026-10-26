@@ -1,0 +1,381 @@
+"""LLM 统一配置类"""
+
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Union
+
+from .summary_budget import SummaryBudgetConfig
+
+
+@dataclass
+class LLMConfig:
+    """LLM 统一配置类"""
+
+    # 必需参数（无默认值）
+    api_key: str
+    base_url: str
+    calibrate_model: str
+    summary_model: str
+
+    # 可选参数（有默认值）
+    calibrate_reasoning_effort: Optional[str] = None
+    summary_reasoning_effort: Optional[str] = None
+
+    # 关键信息提取模型
+    key_info_model: Optional[str] = None  # 默认使用 calibrate_model
+    key_info_reasoning_effort: Optional[str] = None
+
+    # 说话人推断模型
+    speaker_model: Optional[str] = None  # 默认使用 calibrate_model
+    speaker_reasoning_effort: Optional[str] = None
+
+    # 说话人推断采样配置（按说话人采样，而非全局前 N 字符截断）
+    speaker_samples_per_speaker: int = 3       # 每个说话人采样的发言条数上限
+    speaker_max_chars_per_speaker: int = 400   # 每个说话人采样文本的总字符上限
+    speaker_context_dialogs: int = 2           # 首次出场前，采集他人发言作为上下文的条数
+    speaker_confidence_threshold: float = 0.6  # 置信度阈值，低于此值不采用推断姓名
+    # 所有说话人采样文本合计的全局字符上限，防止 diarization 切分错误产生大量
+    # 虚假说话人标签时，单人上限仍因人数膨胀导致 prompt 总量失控
+    speaker_max_total_sample_chars: int = 8000
+
+    # 质量验证模型
+    validator_model: Optional[str] = None  # 默认使用 calibrate_model
+    validator_reasoning_effort: Optional[str] = None
+
+    # 重试配置
+    max_retries: int = 3
+    retry_delay: int = 5
+
+    # 质量配置
+    min_calibrate_ratio: float = 0.80
+    min_summary_threshold: int = 500
+
+    # 统一质量验证配置
+    quality_score_weights: Dict[str, float] = field(
+        default_factory=lambda: {
+            "accuracy": 0.40,
+            "completeness": 0.30,
+            "fluency": 0.20,
+            "format": 0.10,
+        }
+    )
+
+    # 分段配置
+    # 注意：下面三个阈值存在**第三套取值**——2026-10-03 在 n305 只读核对生产
+    # /app/config/config.jsonc 实测为 enable_threshold=3000 / segment_size=1500 /
+    # max_segment_size=3000，与这里的 dataclass 默认（5000/2000/3000）和
+    # config/config.example.jsonc 的推荐值（20000/8000/12000）都不同。
+    # 本仓库不对齐它们（生产取值是否合理是独立的产品问题），详见 #147。
+    enable_threshold: int = 5000
+    segment_size: int = 2000
+    max_segment_size: int = 3000
+    # 分段质量验证配置（纯文本）
+    segmentation_validation_enabled: bool = False
+    segmentation_pass_ratio: float = 0.7
+    segmentation_force_retry_ratio: float = 0.5
+    segmentation_fallback_strategy: str = "best_quality"
+
+    # 并发配置
+    concurrent_workers: int = 10
+
+    # 结构化校对配置
+    min_chunk_length: int = 300
+    max_chunk_length: int = 1500
+    preferred_chunk_length: int = 800
+    max_calibration_retries: int = 2
+    calibration_concurrent_limit: int = 3
+    chunk_time_budget: int = 300  # 单个 chunk 校对的时间预算（秒），超时直接 fallback
+    # ID 锚点校对：chunk 中被返回修正的对话占比低于此阈值时，视为低覆盖（疑似截断/偷懒）触发重试
+    min_correction_coverage: float = 0.5
+    enable_validation: bool = False  # 是否启用分段质量验证（每个chunk独立打分，不再进行整体验证）
+    # 结构化校对质量验证配置（对话流）
+    structured_validation_enabled: bool = False
+    # 默认值必须与 from_dict 缺键时的派生结果一致（生产走 from_dict，见 #147）。
+    # tests/unit/test_llm_config_defaults.py 逐字段锁住这一致性，派生字段走显式豁免清单。
+    structured_fallback_strategy: str = "formatted_original"
+
+    # 质量阈值
+    overall_score_threshold: float = 8.0
+    minimum_single_score: float = 7.0
+
+    # llm-compat 集成配置
+    content_fallbacks: Optional[Dict[str, List[str]]] = None
+    collector_url: Optional[str] = None
+    collector_project: str = ""
+    collector_api_key: str = ""
+    refusal_keywords_url: Optional[Union[str, List[str]]] = None
+    total_timeout: float = 300.0
+
+    # 章节梗概生成模型（默认使用 calibrate_model）
+    # 注：本段落字段（含以下 3 个）追加于 dataclass 字段列表末尾，而非插在中间——
+    # 插在中间会移位既有的可选位置参数，老代码若按位置传参（例如 speaker 相关
+    # 配置）会静默写进这里，新增字段一律追加到最后以保持位置参数兼容。
+    chapters_model: Optional[str] = None
+    chapters_reasoning_effort: Optional[str] = None
+    min_chapters_threshold: int = 10000  # 原文字符数低于此值不生成章节（正常跳过，非失败）
+    # 章节生成输入的字符数上限：超过此值直接判为 FAILED，而不是把超大输入硬塞给模型。
+    # 须与 chapters_model 的上下文窗口能力匹配——换用上下文更小/更大的模型时需同步调整。
+    max_chapters_input_chars: int = 500000
+
+    # 以下 6 个字段（plain 源结构化校对 + 确定性段落化，T8）同样追加于末尾，
+    # 保持位置参数兼容（纪律同上方 chapters 段注释）。
+    # plain 源（CapsWriter/YouTube 字幕，无说话人标识）结构化逐段校对总开关。
+    # 默认 true（2026-07-19 T9 真实样本验收通过后由暗启动翻正）；置 false 可回退
+    # 旧纯文本路径，已产出产物凭 provenance "mode": "plain_structured" 识别并忽略。
+    structured_calibration_for_plain: bool = True
+    # 无说话人模式的独立分块参数（plain 段落比对话长，分块预算相应放大）
+    plain_structured_preferred_chunk_length: int = 3000
+    plain_structured_max_chunk_length: int = 4000
+    # 确定性段落化参数（v1：长度只是预算不是闸刀，到预算找授权断点）
+    paragraphization_target_chars: int = 300            # 段落长度预算（字符）
+    paragraphization_hard_max_chars: int = 600          # 段落软上限：成员内不切，单成员超限会自成一段，组长 ≤ 2×
+    paragraphization_pause_threshold_seconds: float = 2.0  # 停顿授权阈值（秒）
+    # Semantic contradiction scan (Increment 2), enabled by default.
+    contradiction_scan_enabled: bool = True
+
+    # Chapter-detailed notes. These fields are appended to preserve legacy
+    # positional construction of LLMConfig.
+    notes_model: Optional[str] = None
+    notes_reasoning_effort: Optional[str] = None
+    notes_concurrency: int = 10
+
+    # Summary output budget (prompt + max_tokens + post-hoc cap share one curve).
+    summary_budget: SummaryBudgetConfig = field(default_factory=SummaryBudgetConfig)
+
+    # Share-card copy. Appended to preserve legacy positional construction
+    # of LLMConfig (same reason as the notes fields above).
+    share_card_model: Optional[str] = None
+    share_card_reasoning_effort: Optional[str] = None
+
+    @classmethod
+    def from_dict(cls, config_dict: dict) -> "LLMConfig":
+        """从配置字典创建 LLMConfig 实例
+
+        Args:
+            config_dict: 完整的配置字典
+
+        Returns:
+            LLMConfig 实例
+        """
+        llm_config = config_dict.get("llm", {})
+        segmentation_config = llm_config.get("segmentation", {})
+        calibration_config = llm_config.get("structured_calibration", {})
+        paragraphization_config = llm_config.get("paragraphization", {})
+        speaker_inference_config = llm_config.get("speaker_inference", {})
+        quality_validation_config = llm_config.get("quality_validation", {})
+        quality_config = quality_validation_config.get(
+            "quality_threshold", calibration_config.get("quality_threshold", {})
+        )
+        score_weights = quality_validation_config.get("score_weights")
+
+        segmentation_validation = segmentation_config.get("quality_validation", {})
+        structured_validation = calibration_config.get("quality_validation", {})
+
+        # 导入 normalize_reasoning_effort 函数
+        from .. import normalize_reasoning_effort
+
+        # 统一质量验证权重（默认值）
+        if not score_weights:
+            score_weights = {
+                "accuracy": 0.40,
+                "completeness": 0.30,
+                "fluency": 0.20,
+                "format": 0.10,
+            }
+
+        # 纯文本质量验证配置（兼容旧版：若缺失则默认关闭）
+        segmentation_validation_enabled = segmentation_validation.get("enabled")
+        if segmentation_validation_enabled is None:
+            segmentation_validation_enabled = False
+
+        # 对话流质量验证配置（兼容旧字段）
+        structured_validation_enabled = structured_validation.get("enabled")
+        if structured_validation_enabled is None:
+            structured_validation_enabled = calibration_config.get("enable_validation", False)
+
+        structured_fallback_strategy = structured_validation.get("fallback_strategy")
+        if not structured_fallback_strategy:
+            fallback_to_original = calibration_config.get("fallback_to_original", True)
+            structured_fallback_strategy = (
+                "formatted_original" if fallback_to_original else "best_quality"
+            )
+
+        return cls(
+            # API 配置
+            api_key=llm_config["api_key"],
+            base_url=llm_config["base_url"],
+
+            # 校对模型
+            calibrate_model=llm_config["calibrate_model"],
+            calibrate_reasoning_effort=normalize_reasoning_effort(
+                llm_config.get("calibrate_reasoning_effort")
+            ),
+
+            # 总结模型
+            summary_model=llm_config["summary_model"],
+            summary_reasoning_effort=normalize_reasoning_effort(
+                llm_config.get("summary_reasoning_effort")
+            ),
+
+            # 关键信息提取模型（默认使用校对模型）
+            key_info_model=llm_config.get("key_info_model", llm_config["calibrate_model"]),
+            key_info_reasoning_effort=normalize_reasoning_effort(
+                llm_config.get("key_info_reasoning_effort")
+            ),
+
+            # 说话人推断模型（默认使用校对模型）
+            speaker_model=llm_config.get("speaker_model", llm_config["calibrate_model"]),
+            speaker_reasoning_effort=normalize_reasoning_effort(
+                llm_config.get("speaker_reasoning_effort")
+            ),
+
+            # 章节梗概生成模型（默认使用校对模型）
+            chapters_model=llm_config.get("chapters_model", llm_config["calibrate_model"]),
+            chapters_reasoning_effort=normalize_reasoning_effort(
+                llm_config.get("chapters_reasoning_effort")
+            ),
+
+            # 说话人推断采样配置
+            speaker_samples_per_speaker=speaker_inference_config.get("samples_per_speaker", 3),
+            speaker_max_chars_per_speaker=speaker_inference_config.get(
+                "max_chars_per_speaker", 400
+            ),
+            speaker_context_dialogs=speaker_inference_config.get("context_dialogs", 2),
+            speaker_confidence_threshold=speaker_inference_config.get(
+                "confidence_threshold", 0.6
+            ),
+            speaker_max_total_sample_chars=speaker_inference_config.get(
+                "max_total_sample_chars", 8000
+            ),
+
+            # 质量验证模型
+            validator_model=calibration_config.get(
+                "validator_model", llm_config["calibrate_model"]
+            ),
+            validator_reasoning_effort=normalize_reasoning_effort(
+                calibration_config.get("validator_reasoning_effort")
+            ),
+
+            # 重试配置
+            max_retries=llm_config.get("max_retries", 3),
+            retry_delay=llm_config.get("retry_delay", 5),
+
+            # 质量配置
+            min_calibrate_ratio=llm_config.get("min_calibrate_ratio", 0.80),
+            min_summary_threshold=llm_config.get("min_summary_threshold", 500),
+            min_chapters_threshold=llm_config.get("min_chapters_threshold", 10000),
+            max_chapters_input_chars=llm_config.get("max_chapters_input_chars", 500000),
+            quality_score_weights=score_weights,
+
+            # 分段配置
+            enable_threshold=segmentation_config.get("enable_threshold", 5000),
+            segment_size=segmentation_config.get("segment_size", 2000),
+            max_segment_size=segmentation_config.get("max_segment_size", 3000),
+            concurrent_workers=segmentation_config.get("concurrent_workers", 10),
+            segmentation_validation_enabled=segmentation_validation_enabled,
+            segmentation_pass_ratio=segmentation_validation.get("pass_ratio", 0.7),
+            segmentation_force_retry_ratio=segmentation_validation.get("force_retry_ratio", 0.5),
+            segmentation_fallback_strategy=segmentation_validation.get(
+                "fallback_strategy", "best_quality"
+            ),
+
+            # 结构化校对配置
+            min_chunk_length=calibration_config.get("min_chunk_length", 300),
+            max_chunk_length=calibration_config.get("max_chunk_length", 1500),
+            preferred_chunk_length=calibration_config.get("preferred_chunk_length", 800),
+            max_calibration_retries=calibration_config.get("max_calibration_retries", 2),
+            calibration_concurrent_limit=calibration_config.get(
+                "calibration_concurrent_limit", 3
+            ),
+            chunk_time_budget=calibration_config.get("chunk_time_budget", 300),
+            min_correction_coverage=calibration_config.get("min_correction_coverage", 0.5),
+            # enable_validation 保持向后兼容（指向结构化校对质量验证开关）
+            enable_validation=structured_validation_enabled,
+            structured_validation_enabled=structured_validation_enabled,
+            structured_fallback_strategy=structured_fallback_strategy,
+
+            # 质量阈值
+            overall_score_threshold=quality_config.get("overall_score", 8.0),
+            minimum_single_score=quality_config.get("minimum_single_score", 7.0),
+
+            # llm-compat 集成
+            content_fallbacks=llm_config.get("content_fallbacks"),
+            collector_url=llm_config.get("collector_url"),
+            collector_project=llm_config.get("collector_project", ""),
+            collector_api_key=llm_config.get("collector_api_key", ""),
+            refusal_keywords_url=llm_config.get("refusal_keywords_url"),
+            total_timeout=float(llm_config.get("total_timeout", 300.0)),
+
+            # plain 源结构化校对开关（llm 顶层键）+ 无说话人独立分块（structured_calibration 段）
+            structured_calibration_for_plain=llm_config.get(
+                "structured_calibration_for_plain", True
+            ),
+            plain_structured_preferred_chunk_length=calibration_config.get(
+                "plain_preferred_chunk_length", 3000
+            ),
+            plain_structured_max_chunk_length=calibration_config.get(
+                "plain_max_chunk_length", 4000
+            ),
+
+            # 确定性段落化配置（llm.paragraphization 段）
+            paragraphization_target_chars=paragraphization_config.get("target_chars", 300),
+            paragraphization_hard_max_chars=paragraphization_config.get(
+                "hard_max_chars", 600
+            ),
+            paragraphization_pause_threshold_seconds=paragraphization_config.get(
+                "pause_threshold_seconds", 2.0
+            ),
+            contradiction_scan_enabled=llm_config.get(
+                "contradiction_scan_enabled",
+                speaker_inference_config.get("contradiction_scan_enabled", True),
+            ),
+
+            # Notes default to the summary model and effort when omitted.
+            notes_model=llm_config.get("notes_model", llm_config["summary_model"]),
+            notes_reasoning_effort=normalize_reasoning_effort(
+                llm_config.get(
+                    "notes_reasoning_effort",
+                    llm_config.get("summary_reasoning_effort"),
+                )
+            ),
+            notes_concurrency=llm_config.get("notes_concurrency", 10),
+            summary_budget=SummaryBudgetConfig.from_dict(
+                llm_config.get("summary_budget")
+            ),
+            # Share-card defaults to the summary model and effort when omitted.
+            share_card_model=llm_config.get(
+                "share_card_model", llm_config["summary_model"]
+            ),
+            share_card_reasoning_effort=normalize_reasoning_effort(
+                llm_config.get(
+                    "share_card_reasoning_effort",
+                    llm_config.get("summary_reasoning_effort"),
+                )
+            ),
+        )
+
+    def get_models(self) -> dict:
+        """获取当前模型配置
+
+        Returns:
+            包含所有模型的字典
+        """
+        return {
+            "calibrate_model": self.calibrate_model,
+            "calibrate_reasoning_effort": self.calibrate_reasoning_effort,
+            "summary_model": self.summary_model,
+            "summary_reasoning_effort": self.summary_reasoning_effort,
+            "notes_model": self.notes_model or self.summary_model,
+            "notes_reasoning_effort": (
+                self.notes_reasoning_effort
+                if self.notes_reasoning_effort is not None
+                else self.summary_reasoning_effort
+            ),
+            "share_card_model": self.share_card_model or self.summary_model,
+            "share_card_reasoning_effort": (
+                self.share_card_reasoning_effort
+                if self.share_card_reasoning_effort is not None
+                else self.summary_reasoning_effort
+            ),
+            "validator_model": self.validator_model,
+            "validator_reasoning_effort": self.validator_reasoning_effort,
+        }

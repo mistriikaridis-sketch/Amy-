@@ -1,0 +1,1897 @@
+﻿/**
+ * 阅稿 — Japanese paper / hanko visual language (product shell + /view)
+ *
+ * Philosophy: restrained wa palette, serif soul, board-straight grid,
+ * one vermillion hanko, hairlines & whitespace, gentle reveals.
+ * Load AFTER styles.css / page inline chrome so tokens win.
+ */
+
+@import url("https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600&family=Noto+Sans+SC:wght@400;500&display=swap");
+
+/* ==========================================================================
+   1) Design tokens
+   ========================================================================== */
+
+:root,
+html[data-theme="light"],
+html.yg-shell,
+html.jp-minimal {
+  --bg: #fafaf7;
+  --bg-elevated: #fffefc;
+  --bg-stone: #f3f0ea;
+  --ink: #1a1a18;
+  --ink-secondary: #5c5852;
+  --ink-tertiary: #8a847c;
+  --line: #e8e4dc;
+  --line-strong: #ddd7cc;
+  --accent: #c3272b;              /* hanko vermillion — ONE use */
+  --accent-soft: #f7ebe9;
+  --pine: #2f5d50;                /* muted wa — links / secondary */
+  --sakura: #8a6b7a;
+  --indigo-wa: #5a6f8b;
+
+  --speaker-0: #5b7c6e;
+  --speaker-1: #8a6b7a;
+  --speaker-2: #5a6f8b;
+  --speaker-3: #7a6b5a;
+  --speaker-4: #6a7a5a;
+  --speaker-5: #7a5a6a;
+  --speaker-6: #5a7a8b;
+  --speaker-7: #6b6560;
+
+  --font-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC",
+    "Hiragino Mincho ProN", "STSong", "SimSun", serif;
+  --font-sans: "Noto Sans SC", "Source Han Sans SC", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "Sarasa Mono SC", ui-monospace, SFMono-Regular,
+    Menlo, Consolas, monospace;
+
+  --content-max: 40rem;
+  --shell-max: 44rem;
+  --page-pad-x: clamp(1.1rem, 4vw, 2.5rem);
+  --page-pad-y: 2.75rem;
+  --block-gap: 1.85rem;
+  --dialog-gap: 1.35rem;
+  --radius: 2px;                  /* 木工直角倾向 */
+  --toc-width: 14rem;
+  --shadow-soft: 0 8px 28px rgba(26, 26, 24, 0.035);
+
+  /* Bridge legacy styles.css vars → paper */
+  --bg-gradient-start: #fafaf7;
+  --bg-gradient-end: #f3f0ea;
+  --text-primary: var(--ink);
+  --text-secondary: var(--ink-secondary);
+  --text-tertiary: var(--ink-tertiary);
+  --bg-primary: var(--bg-elevated);
+  --bg-secondary: var(--bg);
+  --bg-tertiary: var(--bg-stone);
+  --border-primary: var(--line);
+  --border-secondary: var(--line-strong);
+  --border-focus: var(--pine);
+  --header-text: var(--ink);
+  --accent-primary: var(--pine);
+  --accent-secondary: #3d7264;
+  --shadow-light: rgba(26, 26, 24, 0.04);
+  --shadow-medium: rgba(26, 26, 24, 0.08);
+  --error-bg: #f7ebe9;
+  --error-border: #d4a8a6;
+  --error-text: #8f3d3d;
+  --success-bg: #eef4f1;
+  --success-border: #a8c4b8;
+  --success-text: #2f5d50;
+  --loading-bg: #f3f0ea;
+  --loading-border: var(--line-strong);
+  --loading-text: var(--ink-secondary);
+}
+
+html[data-theme="dark"] {
+  --bg: #141311;
+  --bg-elevated: #1e1c1a;
+  --bg-stone: #2a2724;
+  --ink: #ede8e1;
+  --ink-secondary: #a39e97;
+  --ink-tertiary: #7a756f;
+  --line: #2c2926;
+  --line-strong: #3a3632;
+  --accent: #c3272b;
+  --accent-soft: #3a2222;
+  --pine: #7eb8a8;
+  --shadow-soft: 0 4px 16px rgba(0, 0, 0, 0.22);
+  --bg-gradient-start: #1e1c1a;
+  --bg-gradient-end: #141311;
+  --text-primary: var(--ink);
+  --text-secondary: var(--ink-secondary);
+  --text-tertiary: var(--ink-tertiary);
+  --bg-primary: var(--bg-elevated);
+  --bg-secondary: var(--bg);
+  --bg-tertiary: var(--bg-stone);
+  --border-primary: var(--line);
+  --border-secondary: var(--line-strong);
+  --border-focus: var(--pine);
+  --header-text: var(--ink);
+  --accent-primary: var(--pine);
+  --accent-secondary: #5a8f82;
+}
+
+/* Kill upstream OSS fingerprints */
+.oss-bar,
+.powered-footer {
+  display: none !important;
+}
+
+/* ==========================================================================
+   2) Paper canvas + type
+   ========================================================================== */
+
+html.yg-shell,
+html.jp-minimal {
+  background: var(--bg);
+}
+
+html.yg-shell body,
+html.jp-minimal body,
+body.yg-home {
+  font-family: var(--font-serif) !important;
+  font-weight: 400;
+  color: var(--ink) !important;
+  background:
+    radial-gradient(ellipse at 18% 0%, rgba(255, 255, 255, 0.72), transparent 52%),
+    radial-gradient(ellipse at 88% 12%, rgba(243, 240, 234, 0.9), transparent 48%),
+    var(--bg) !important;
+  background-attachment: fixed !important;
+  min-height: 100vh;
+  line-height: 1.85;
+  -webkit-font-smoothing: antialiased;
+  animation: yg-reveal 0.55s ease-out both;
+}
+
+@keyframes yg-reveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Sans only for chrome / meta / labels */
+.yg-mast,
+.yg-mast-links,
+.site-nav,
+.site-nav-link,
+.form-label,
+.form-help,
+.checkbox-desc,
+.input-feedback,
+.theme-toggle,
+.mode-tab,
+.advanced-toggle,
+.transcription-options-toggle,
+.auth-bar,
+.filter-bar,
+.btn,
+.yg-kicker,
+.yg-meta,
+.toc-title,
+.time-tag,
+.speaker-tag,
+.stats-line,
+.drop-zone-hint,
+.upload-file-size,
+.yg-foot,
+footer.footer,
+.public-language-switch {
+  font-family: var(--font-sans) !important;
+}
+
+/* ==========================================================================
+   3) Shared masthead (home / submit / history)
+   ========================================================================== */
+
+.yg-mast {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.95rem var(--page-pad-x);
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+  backdrop-filter: blur(8px);
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
+
+.yg-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  text-decoration: none;
+  color: var(--ink);
+}
+
+.yg-seal {
+  width: 1.7rem;
+  height: 1.7rem;
+  background: var(--accent);
+  color: #fffefc;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-serif);
+  font-weight: 500;
+  font-size: 0.88rem;
+  letter-spacing: 0.04em;
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+.yg-brand-name {
+  font-family: var(--font-serif);
+  font-size: 1.05rem;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+}
+
+.yg-mast-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.15rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+}
+
+.yg-mast-links a {
+  color: var(--ink-secondary);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  padding: 0.15rem 0;
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.yg-mast-links a:hover,
+.yg-mast-links a[aria-current="page"] {
+  color: var(--ink);
+  border-bottom-color: var(--line-strong);
+}
+
+/* ==========================================================================
+   4) Landing home (rendered by home_page.py)
+   ========================================================================== */
+
+.yg-home {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-height: 100vh;
+}
+
+.yg-main {
+  width: min(var(--shell-max), 100%);
+  margin: 0 auto;
+  padding: 2.75rem var(--page-pad-x) 3.75rem;
+}
+
+.yg-hero {
+  display: grid;
+  grid-template-columns: 2.4rem 1fr;
+  gap: 1.5rem;
+  align-items: start;
+  margin-bottom: 2.5rem;
+}
+
+.yg-hero-tategaki {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  font-family: var(--font-serif);
+  font-weight: 500;
+  font-size: 1.05rem;
+  letter-spacing: 0.35em;
+  color: var(--ink-tertiary);
+  border-right: 1px solid var(--line);
+  padding-right: 0.85rem;
+  min-height: 9.5rem;
+  line-height: 1.2;
+}
+
+.yg-kicker {
+  font-size: 0.72rem;
+  letter-spacing: 0.28em;
+  color: var(--ink-tertiary);
+  margin: 0 0 0.85rem;
+  text-transform: none;
+}
+
+.yg-hero-title {
+  font-family: var(--font-serif);
+  font-size: clamp(1.85rem, 4.2vw, 2.55rem);
+  font-weight: 500;
+  line-height: 1.38;
+  letter-spacing: 0.04em;
+  margin: 0 0 1rem;
+  color: var(--ink);
+}
+
+.yg-hero-lead {
+  font-family: var(--font-serif);
+  color: var(--ink-secondary);
+  font-size: 1.02rem;
+  font-weight: 400;
+  line-height: 1.85;
+  margin: 0;
+  max-width: 34rem;
+}
+
+.yg-steps {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 2.25rem;
+  display: grid;
+  gap: 0;
+  border-top: 1px solid var(--line);
+}
+
+.yg-steps li {
+  display: grid;
+  grid-template-columns: 2.75rem 1fr;
+  gap: 1rem;
+  align-items: start;
+  padding: 1.15rem 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+}
+
+.yg-step-num {
+  font-family: var(--font-serif);
+  font-size: 1.35rem;
+  font-weight: 500;
+  color: var(--ink-tertiary);
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  padding-top: 0.1rem;
+}
+
+.yg-step-title {
+  font-family: var(--font-serif);
+  font-weight: 500;
+  font-size: 1.02rem;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.3rem;
+  color: var(--ink);
+}
+
+.yg-step-desc {
+  font-family: var(--font-serif);
+  font-size: 0.92rem;
+  color: var(--ink-secondary);
+  line-height: 1.75;
+}
+
+.yg-cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.1rem;
+  align-items: center;
+  margin-bottom: 2.75rem;
+}
+
+/* THE hanko CTA — single vermillion surface on landing */
+.yg-cta-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: #fffefc;
+  text-decoration: none;
+  padding: 0.78rem 1.7rem;
+  border-radius: 1px;
+  font-family: var(--font-sans);
+  font-weight: 500;
+  font-size: 0.92rem;
+  letter-spacing: 0.14em;
+  border: none;
+  transition: filter 0.2s ease, transform 0.2s ease;
+}
+
+.yg-cta-primary:hover {
+  filter: brightness(1.04);
+  transform: translateY(-1px);
+}
+
+.yg-cta-secondary {
+  display: inline-flex;
+  color: var(--ink-secondary);
+  text-decoration: none;
+  font-family: var(--font-sans);
+  font-size: 0.86rem;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid transparent;
+  padding: 0.35rem 0;
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.yg-cta-secondary:hover {
+  color: var(--ink);
+  border-bottom-color: var(--line-strong);
+}
+
+.yg-panel {
+  border-top: 1px solid var(--line);
+  padding-top: 1.35rem;
+  margin-top: 0.25rem;
+}
+
+.yg-panel summary {
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-weight: 500;
+  color: var(--ink-secondary);
+  list-style: none;
+  font-size: 0.86rem;
+  letter-spacing: 0.08em;
+}
+
+.yg-panel summary::-webkit-details-marker { display: none; }
+.yg-panel summary::before {
+  content: "▸ ";
+  color: var(--ink-tertiary);
+  font-size: 0.75rem;
+}
+.yg-panel[open] summary::before { content: "▾ "; }
+
+.yg-adv {
+  margin-top: 1rem;
+  padding: 1.15rem 0 0;
+  font-family: var(--font-serif);
+  font-size: 0.92rem;
+  color: var(--ink-secondary);
+  line-height: 1.8;
+  border-top: 1px solid var(--line);
+}
+
+.yg-adv strong { color: var(--ink); font-weight: 500; }
+.yg-adv a { color: var(--pine); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--pine) 35%, transparent); }
+.yg-adv a:hover { border-bottom-color: var(--pine); }
+.yg-adv code,
+.yg-adv pre {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  background: var(--bg-stone);
+  color: var(--ink);
+}
+.yg-adv code { padding: 0.08rem 0.32rem; border-radius: 1px; }
+.yg-adv pre {
+  margin: 0.75rem 0;
+  padding: 0.9rem 1rem;
+  border-radius: 1px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  border: 1px solid var(--line);
+}
+
+.yg-foot {
+  text-align: center;
+  padding: 1.15rem var(--page-pad-x);
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  color: var(--ink-tertiary);
+  border-top: 1px solid var(--line);
+  background: var(--bg-elevated);
+}
+
+@media (max-width: 640px) {
+  .yg-hero {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+  .yg-hero-tategaki {
+    writing-mode: horizontal-tb;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+    padding: 0 0 0.75rem;
+    min-height: 0;
+    letter-spacing: 0.28em;
+    font-size: 0.78rem;
+  }
+}
+
+/* ==========================================================================
+   5) Submit page (index.html) — paper chrome over legacy form
+   ========================================================================== */
+
+html.yg-shell .container,
+html.jp-minimal .container {
+  max-width: var(--shell-max) !important;
+  margin: 0 auto !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  border: none !important;
+  border-radius: 0 !important;
+  overflow: visible !important;
+}
+
+html.yg-shell .header,
+html.jp-minimal .header,
+html.yg-shell body .container > .header {
+  background: var(--bg-elevated) !important;
+  background-image: none !important;
+  color: var(--ink) !important;
+  border-bottom: 1px solid var(--line) !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  text-align: left !important;
+  padding: 1.5rem var(--page-pad-x) 1.35rem !important;
+  position: relative;
+}
+
+html.yg-shell .header h1,
+html.jp-minimal .header h1 {
+  font-family: var(--font-serif) !important;
+  color: var(--ink) !important;
+  font-size: clamp(1.45rem, 3vw, 1.85rem) !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.06em;
+  margin: 0.45rem 0 0.45rem !important;
+  text-align: left !important;
+  line-height: 1.4;
+}
+
+html.yg-shell .header .meta,
+html.yg-shell .header p,
+html.yg-shell .header .meta a,
+html.yg-shell .header-text {
+  font-family: var(--font-serif) !important;
+  color: var(--ink-secondary) !important;
+  font-size: 0.95rem;
+  font-weight: 400;
+  line-height: 1.7;
+}
+
+html.yg-shell .site-nav {
+  justify-content: flex-start !important;
+  gap: 1.1rem !important;
+  margin: 0 0 0.85rem !important;
+  flex-wrap: wrap;
+}
+
+html.yg-shell .site-nav-link {
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 1px solid transparent !important;
+  border-radius: 0 !important;
+  padding: 0.15rem 0 !important;
+  font-size: 0.8rem !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.06em;
+  color: var(--ink-secondary) !important;
+  min-height: auto !important;
+}
+
+html.yg-shell .site-nav-link:hover {
+  color: var(--ink) !important;
+  border-bottom-color: var(--line-strong) !important;
+  background: transparent !important;
+}
+
+html.yg-shell .theme-toggle {
+  border: 1px solid var(--line) !important;
+  color: var(--ink-secondary) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  border-radius: 1px !important;
+}
+
+html.yg-shell .main-content {
+  padding: 1.75rem var(--page-pad-x) 2.5rem !important;
+}
+
+/* Three-step guide on submit */
+.yg-guide {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  margin: 0 0 1.75rem;
+  padding: 0 0.15rem; /* tiny outer breathing room */
+  list-style: none;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.yg-guide li {
+  border: none;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  border-radius: 0;
+  /* Equal gutters so CJK glyphs don't kiss the vertical dividers */
+  padding: 0.95rem 1.15rem 1rem;
+  font-family: var(--font-serif);
+  font-size: 0.78rem;
+  color: var(--ink-secondary);
+  line-height: 1.55;
+}
+
+.yg-guide li:last-child { border-right: none; }
+.yg-guide li:first-child { /* keep same horizontal pad as siblings */ }
+
+.yg-guide strong {
+  display: block;
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-weight: 500;
+  margin-bottom: 0.28rem;
+  font-size: 0.84rem;
+  letter-spacing: 0.03em;
+}
+
+.yg-guide .n {
+  display: inline;
+  width: auto;
+  height: auto;
+  border: none;
+  border-radius: 0;
+  margin-right: 0.3rem;
+  color: var(--ink-tertiary);
+  font-family: var(--font-serif);
+  font-size: 0.84rem;
+  line-height: inherit;
+}
+
+@media (max-width: 720px) {
+  .yg-guide { grid-template-columns: 1fr; }
+  .yg-guide li {
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+    padding: 0.9rem 0;
+  }
+  .yg-guide li:last-child { border-bottom: none; }
+}
+
+/* Mode tabs — underline, not indigo pills */
+html.yg-shell .mode-tabs {
+  border-bottom: 1px solid var(--line) !important;
+  gap: 0 !important;
+  margin-bottom: 1.25rem !important;
+  padding-bottom: 0 !important;
+}
+
+html.yg-shell .mode-tab {
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 2px solid transparent !important;
+  border-radius: 0 !important;
+  color: var(--ink-secondary) !important;
+  font-family: var(--font-sans) !important;
+  font-weight: 500 !important;
+  font-size: 0.86rem !important;
+  letter-spacing: 0.06em;
+  padding: 0.65rem 1rem 0.75rem !important;
+  min-height: 44px;
+  box-shadow: none !important;
+}
+
+html.yg-shell .mode-tab:hover {
+  color: var(--ink) !important;
+  border-color: transparent !important;
+}
+
+html.yg-shell .mode-tab.active {
+  background: transparent !important;
+  color: var(--ink) !important;
+  border-bottom-color: var(--ink) !important;
+  box-shadow: none !important;
+  font-weight: 500 !important;
+}
+
+/* Forms — sharp, paper */
+html.yg-shell .form-label {
+  color: var(--ink) !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.04em;
+  font-size: 0.86rem !important;
+}
+
+html.yg-shell .form-textarea,
+html.yg-shell .form-input,
+html.yg-shell input.form-input,
+html.yg-shell textarea {
+  background: var(--bg-elevated) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 1px !important;
+  color: var(--ink) !important;
+  font-family: var(--font-serif) !important;
+  box-shadow: none !important;
+}
+
+html.yg-shell .form-textarea:focus,
+html.yg-shell .form-input:focus {
+  border-color: var(--pine) !important;
+  outline: none !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pine) 12%, transparent) !important;
+}
+
+html.yg-shell .upload-drop-zone {
+  border: 1px dashed var(--line-strong) !important;
+  border-radius: 1px !important;
+  background: var(--bg-elevated) !important;
+}
+
+html.yg-shell .upload-drop-zone:hover,
+html.yg-shell .upload-drop-zone:focus-visible,
+html.yg-shell .upload-drop-zone.dragover {
+  border-color: var(--pine) !important;
+  background: var(--bg-stone) !important;
+}
+
+html.yg-shell .upload-disabled-banner,
+html.yg-shell .upload-privacy-notice,
+html.yg-shell .upload-file-info,
+html.yg-shell .auth-missing-prompt {
+  border-radius: 1px !important;
+  box-shadow: none !important;
+}
+
+html.yg-shell .transcription-options-toggle,
+html.yg-shell .advanced-toggle {
+  background: transparent !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 1px !important;
+  color: var(--ink-secondary) !important;
+  box-shadow: none !important;
+}
+
+html.yg-shell .transcription-options-panel,
+html.yg-shell .advanced-settings {
+  border: 1px solid var(--line) !important;
+  border-radius: 1px !important;
+  background: var(--bg-elevated) !important;
+}
+
+/* THE hanko CTA on submit — only primary submit button */
+html.yg-shell #submit-btn,
+html.yg-shell #transcribe-form button[type="submit"],
+html.yg-shell .submit-btn {
+  background: var(--accent) !important;
+  border: 1px solid var(--accent) !important;
+  color: #fffefc !important;
+  box-shadow: none !important;
+  border-radius: 1px !important;
+  font-family: var(--font-sans) !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.14em !important;
+  padding: 0.85rem 1.5rem !important;
+}
+
+html.yg-shell #submit-btn:disabled,
+html.yg-shell .submit-btn:disabled {
+  opacity: 0.45;
+  filter: grayscale(0.2);
+}
+
+html.yg-shell #submit-btn .btn-icon {
+  display: none; /* drop emoji rocket — quieter */
+}
+
+html.yg-shell footer.footer {
+  background: transparent !important;
+  border-top: 1px solid var(--line) !important;
+  color: var(--ink-tertiary) !important;
+  font-size: 0.72rem !important;
+  letter-spacing: 0.12em;
+  padding: 1.25rem var(--page-pad-x) 2rem !important;
+  text-align: center;
+}
+
+html.yg-shell footer.footer a {
+  color: var(--ink-secondary) !important;
+  text-decoration: none;
+  border-bottom: 1px solid var(--line);
+}
+
+html.yg-shell footer.footer a:hover {
+  color: var(--ink) !important;
+}
+
+html.yg-shell .status-container,
+html.yg-shell .history-container {
+  border: 1px solid var(--line) !important;
+  border-radius: 1px !important;
+  background: var(--bg-elevated) !important;
+  box-shadow: none !important;
+}
+
+html.yg-shell .history-container h3 {
+  font-family: var(--font-serif) !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.06em;
+}
+
+/* ==========================================================================
+   6) History page shell
+   ========================================================================== */
+
+html.yg-shell.yg-history body,
+body.yg-history {
+  padding: 0 !important;
+  background: var(--bg) !important;
+}
+
+html.yg-shell.yg-history .container {
+  max-width: min(68rem, 100%) !important;
+  padding: 0 var(--page-pad-x) 2.5rem !important;
+}
+
+html.yg-shell.yg-history .header {
+  display: flex !important;
+  align-items: baseline !important;
+  gap: 1rem !important;
+  margin: 0 0 1.5rem !important;
+  padding: 1.75rem 0 1.15rem !important;
+  background: transparent !important;
+  border-bottom: 1px solid var(--line) !important;
+}
+
+html.yg-shell.yg-history .header h1 {
+  font-family: var(--font-serif) !important;
+  font-size: 1.55rem !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.08em;
+  margin: 0 !important;
+}
+
+html.yg-shell.yg-history .site-nav {
+  margin-left: auto !important;
+}
+
+html.yg-shell.yg-history .auth-bar,
+html.yg-shell.yg-history .filter-bar,
+html.yg-shell.yg-history .alias-panel {
+  background: var(--bg-elevated) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 1px !important;
+  box-shadow: none !important;
+}
+
+html.yg-shell.yg-history .auth-bar input,
+html.yg-shell.yg-history .filter-group input,
+html.yg-shell.yg-history .filter-group select {
+  border-radius: 1px !important;
+  background: var(--bg) !important;
+  border: 1px solid var(--line) !important;
+  color: var(--ink) !important;
+}
+
+html.yg-shell.yg-history .btn {
+  border-radius: 1px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.06em;
+  box-shadow: none !important;
+}
+
+/* History primary query button = the ONE hanko */
+html.yg-shell.yg-history .btn-primary {
+  background: var(--accent) !important;
+  color: #fffefc !important;
+  border: 1px solid var(--accent) !important;
+}
+
+html.yg-shell.yg-history .btn-ghost {
+  background: transparent !important;
+  color: var(--ink-secondary) !important;
+  border: 1px solid var(--line) !important;
+}
+
+html.yg-shell.yg-history .task-row {
+  background: var(--bg-elevated) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 1px !important;
+  box-shadow: none !important;
+}
+
+html.yg-shell.yg-history .task-row:hover {
+  border-color: var(--line-strong) !important;
+  background: color-mix(in srgb, var(--bg-stone) 55%, var(--bg-elevated)) !important;
+}
+
+html.yg-shell.yg-history .task-row.selected {
+  border-color: var(--pine) !important;
+  background: color-mix(in srgb, var(--pine) 6%, var(--bg-elevated)) !important;
+}
+
+html.yg-shell.yg-history .task-title {
+  font-family: var(--font-serif) !important;
+  font-weight: 500 !important;
+  color: var(--ink) !important;
+}
+
+html.yg-shell.yg-history .pagination button,
+html.yg-shell.yg-history .page-btn {
+  border-radius: 1px !important;
+  border-color: var(--line) !important;
+}
+
+/* ==========================================================================
+   7) /view reading column
+   ========================================================================== */
+
+html.jp-minimal body {
+  max-width: calc(var(--content-max) + 2 * var(--page-pad-x)) !important;
+  /* Split margins so body.toc-wide-margin can reserve the docked TOC rail.
+     A shorthand `margin: 0 auto !important` previously wiped that reservation
+     and let the fixed 目录 cover stats / calibration / export. */
+  margin-left: auto !important;
+  margin-right: auto !important;
+  padding: var(--page-pad-y) var(--page-pad-x) !important;
+  line-height: 1.9;
+}
+
+/* Wide (>=1400): docked TOC — restore right rail (beats auto margins above). */
+html.jp-minimal body.toc-wide-margin {
+  --yg-toc-rail: 380px;
+  --yg-body-box: calc(var(--content-max) + 2 * var(--page-pad-x));
+  max-width: var(--yg-body-box) !important;
+  margin-left: auto !important;
+  margin-right: calc(
+    var(--yg-toc-rail) + max(0px, (100vw - var(--yg-toc-rail) - var(--yg-body-box)) / 2)
+  ) !important;
+}
+
+/* Mid (769–1399): expanded chapter TOC is position:fixed.
+   Reserve a right gutter so the left reading column stays fully visible. */
+@media (min-width: 769px) and (max-width: 1399px) {
+  html.jp-minimal body:has(#floating-toc.toc-new:not(.toc-collapsed)) {
+    --yg-toc-rail: 360px;
+    --yg-toc-gap: 28px;
+    margin-left: auto !important;
+    margin-right: calc(var(--yg-toc-rail) + var(--yg-toc-gap)) !important;
+  }
+}
+
+html.jp-minimal .container {
+  background: var(--bg-elevated) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: var(--shadow-soft) !important;
+  border: 1px solid var(--line) !important;
+  overflow: hidden !important;
+  max-width: none !important;
+}
+
+html.jp-minimal .header {
+  background: var(--bg-elevated) !important;
+  background-image: none !important;
+  color: var(--ink) !important;
+  padding: 1.75rem 1.75rem 1.35rem !important;
+  text-align: left !important;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0 !important;
+}
+
+html.jp-minimal .header h1 {
+  font-family: var(--font-serif) !important;
+  font-size: 1.45rem !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.03em;
+  line-height: 1.45;
+  color: var(--ink) !important;
+}
+
+.section {
+  padding: 1.5rem 1.75rem !important;
+  margin: 0 !important;
+  border-bottom: 1px solid var(--line);
+}
+
+.section:last-child { border-bottom: none; }
+
+.section-header h2,
+.section h2 {
+  font-family: var(--font-sans) !important;
+  font-size: 0.78rem !important;
+  font-weight: 500 !important;
+  color: var(--ink-secondary) !important;
+  letter-spacing: 0.16em;
+  margin: 0 0 1rem !important;
+}
+
+.content,
+.dialog-content,
+#summary-section .content,
+.summary-content,
+#summary-section .markdown-body {
+  font-family: var(--font-serif) !important;
+  font-size: 1.0625rem !important;
+  line-height: 1.95 !important;
+  color: var(--ink) !important;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+}
+
+.content p { margin: 0 0 1.15em !important; }
+.content p:last-child { margin-bottom: 0 !important; }
+
+.stats-line {
+  background: transparent !important;
+  border: 1px solid var(--line) !important;
+  border-radius: var(--radius) !important;
+  color: var(--ink-secondary) !important;
+  font-size: 0.85rem !important;
+}
+
+.calibration-warning,
+.speaker-risk-warning {
+  background: color-mix(in srgb, #8a6a2f 10%, var(--bg-elevated)) !important;
+  border: 1px solid color-mix(in srgb, #8a6a2f 40%, var(--line)) !important;
+  border-left: 3px solid #8a6a2f !important;
+  border-radius: var(--radius) !important;
+  color: var(--ink) !important;
+  box-shadow: none !important;
+}
+
+.quick-copy-bar,
+.export-links-bar,
+.llm-config-details {
+  background: transparent !important;
+  border-color: var(--line) !important;
+  box-shadow: none !important;
+}
+
+.quick-copy-btn,
+.recalibrate-btn,
+.dialog-btn {
+  border-radius: var(--radius) !important;
+  border-color: var(--line) !important;
+  box-shadow: none !important;
+  font-family: var(--font-sans) !important;
+}
+
+.dialog-btn-confirm,
+.recalibrate-btn:not(.owner-menu-danger) {
+  background: color-mix(in srgb, var(--pine) 12%, var(--bg-elevated)) !important;
+  color: var(--ink) !important;
+  border-color: color-mix(in srgb, var(--pine) 35%, var(--line)) !important;
+}
+
+.dialog-container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dialog-gap);
+}
+
+.dialog-item {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0.2rem 0 0.2rem 0.9rem !important;
+  margin: 0 !important;
+  border-left: 2px solid var(--speaker-0) !important;
+  transition: background 0.15s ease;
+}
+
+.dialog-item:hover {
+  background: color-mix(in srgb, var(--bg) 70%, transparent) !important;
+  transform: none !important;
+}
+
+.dialog-item:nth-child(8n + 1) { border-left-color: var(--speaker-0) !important; }
+.dialog-item:nth-child(8n + 2) { border-left-color: var(--speaker-1) !important; }
+.dialog-item:nth-child(8n + 3) { border-left-color: var(--speaker-2) !important; }
+.dialog-item:nth-child(8n + 4) { border-left-color: var(--speaker-3) !important; }
+.dialog-item:nth-child(8n + 5) { border-left-color: var(--speaker-4) !important; }
+.dialog-item:nth-child(8n + 6) { border-left-color: var(--speaker-5) !important; }
+.dialog-item:nth-child(8n + 7) { border-left-color: var(--speaker-6) !important; }
+.dialog-item:nth-child(8n + 8) { border-left-color: var(--speaker-7) !important; }
+
+.speaker-tag {
+  filter: saturate(0.5) brightness(1.02);
+  opacity: 0.9;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  line-height: 1.3 !important;
+  padding: 0.1rem 0.45rem !important;
+  border-radius: 999px !important;
+  letter-spacing: 0.02em;
+}
+
+.time-tag,
+.chapter-anchor-time {
+  font-family: var(--font-mono) !important;
+  font-size: 11px !important;
+  font-weight: 400 !important;
+  color: var(--ink-tertiary) !important;
+  background: transparent !important;
+  border: none !important;
+}
+
+.dialog-content p { margin: 0 0 0.75em !important; }
+.dialog-content p:last-child { margin-bottom: 0 !important; }
+.paragraph-break { margin-top: 0.95em !important; }
+
+.chapter-anchor {
+  border: none !important;
+  border-top: 1px solid var(--line) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  padding: 1.35rem 0 0.35rem !important;
+  margin: 2rem 0 1rem !important;
+}
+
+.chapter-anchor-title {
+  display: block;
+  font-family: var(--font-serif);
+  font-weight: 500;
+  font-size: 1.05rem;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  margin-bottom: 0.35rem;
+}
+
+.chapter-anchor-gist {
+  color: var(--ink-secondary);
+  font-family: var(--font-serif);
+  font-size: 0.9rem;
+  line-height: 1.65;
+  margin: 0 !important;
+}
+
+/* Floating TOC — vermillion hanko ONLY on active item */
+.floating-toc-container {
+  --toc-bg: var(--bg-elevated) !important;
+  --toc-active: var(--accent) !important;
+  --toc-hairline: var(--line) !important;
+  --toc-shadow: rgba(26, 26, 24, 0.06) !important;
+  --toc-width-collapsed: 2.5rem;
+  width: var(--toc-width);
+  border: 1px solid var(--line) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: var(--shadow-soft) !important;
+  backdrop-filter: none !important;
+}
+
+/* Keep chapter TOC widths aligned with the body gutters above */
+html.jp-minimal .floating-toc-container.toc-new {
+  width: 360px;
+}
+
+html.jp-minimal .floating-toc-container.toc-docked {
+  width: 380px;
+  right: 0;
+  border-radius: 0 !important;
+  border-top: none !important;
+  border-right: none !important;
+  border-bottom: none !important;
+  border-left: 1px solid var(--line) !important;
+  box-shadow: none !important;
+}
+
+.toc-title {
+  font-size: 0.72rem !important;
+  font-weight: 500 !important;
+  color: var(--ink-secondary) !important;
+  letter-spacing: 0.16em;
+}
+
+.toc-link,
+.toc-chapter-title {
+  font-family: var(--font-serif) !important;
+  font-size: 13px !important;
+  line-height: 1.45 !important;
+  color: var(--ink-secondary) !important;
+  font-weight: 400 !important;
+}
+
+.toc-link {
+  border-left: 2px solid transparent !important;
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+.toc-link:hover,
+.toc-chapter-main:hover .toc-chapter-title {
+  color: var(--ink) !important;
+  background: transparent !important;
+}
+
+.toc-link.active,
+.toc-chapter-item.current {
+  color: var(--ink) !important;
+  background: var(--accent-soft) !important;
+  border-left-color: var(--accent) !important;
+}
+
+.toc-chapter-item.current .toc-chapter-title { color: var(--ink) !important; }
+
+.toc-chapter-gist {
+  font-family: var(--font-serif) !important;
+  font-size: 12px !important;
+  line-height: 1.5 !important;
+  color: var(--ink-tertiary) !important;
+  padding: 0.15rem 0.6rem 0.55rem 0.85rem;
+}
+
+.toc-pin-btn,
+.toc-collapse-btn { color: var(--ink-tertiary) !important; }
+
+.floating-toc-mobile-btn {
+  background: var(--bg-elevated) !important;
+  border: 1px solid var(--line) !important;
+  color: var(--ink-secondary) !important;
+  box-shadow: var(--shadow-soft) !important;
+}
+
+.status-processing {
+  text-align: center;
+  color: var(--ink-secondary);
+  padding: 2rem 1rem;
+}
+
+.status-processing h2 {
+  font-family: var(--font-serif) !important;
+  font-size: 1.1rem !important;
+  font-weight: 500 !important;
+  color: var(--ink) !important;
+}
+
+.spinner {
+  border: 2px solid var(--line) !important;
+  border-top-color: var(--pine) !important;
+  width: 28px !important;
+  height: 28px !important;
+  margin: 12px auto !important;
+}
+
+@media (max-width: 800px) {
+  html.jp-minimal body {
+    padding: 1rem 0.85rem 2rem !important;
+  }
+  html.jp-minimal .header,
+  .section {
+    padding-left: 1.1rem !important;
+    padding-right: 1.1rem !important;
+  }
+  html.jp-minimal .header h1 {
+    font-size: 1.25rem !important;
+  }
+  .dialog-item {
+    padding-left: 0.7rem !important;
+  }
+}
+
+/* Help / advanced standalone pages */
+body.yg-help {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-serif);
+  line-height: 1.85;
+}
+
+body.yg-help .wrap {
+  width: min(42rem, 100%);
+  margin: 0 auto;
+  padding: 2.5rem var(--page-pad-x) 3.5rem;
+}
+
+body.yg-help .back {
+  font-family: var(--font-sans);
+  color: var(--ink-secondary);
+  text-decoration: none;
+  font-size: 0.82rem;
+  letter-spacing: 0.06em;
+}
+
+body.yg-help h1 {
+  font-family: var(--font-serif);
+  font-size: 1.7rem;
+  margin: 1.1rem 0 0.6rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+}
+
+body.yg-help h2 {
+  font-family: var(--font-serif);
+  font-size: 1.05rem;
+  margin: 2rem 0 0.55rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+
+body.yg-help p,
+body.yg-help li { color: var(--ink-secondary); }
+body.yg-help a { color: var(--pine); }
+body.yg-help code,
+body.yg-help pre {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  background: var(--bg-stone);
+  color: var(--ink);
+}
+body.yg-help code { padding: 0.08rem 0.32rem; border-radius: 1px; }
+body.yg-help pre {
+  padding: 0.9rem 1rem;
+  border-radius: 1px;
+  overflow: auto;
+  border: 1px solid var(--line);
+}
+
+/* ==========================================================================
+   Error page — paper minimal (no pink alert, one hanko CTA)
+   ========================================================================== */
+
+html.jp-minimal .status-error,
+.status-error {
+  background: transparent !important;
+  border: none !important;
+  border-left: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  box-shadow: none !important;
+  color: var(--ink) !important;
+}
+
+.yg-error {
+  padding-top: 1.75rem !important;
+  padding-bottom: 1.5rem !important;
+}
+
+.yg-error-kicker {
+  font-family: var(--font-sans) !important;
+  font-size: 0.72rem !important;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary) !important;
+  margin: 0 0 0.65rem !important;
+}
+
+.yg-error-heading,
+html.jp-minimal .yg-error-heading,
+.status-error h2 {
+  font-family: var(--font-serif) !important;
+  font-weight: 500 !important;
+  font-size: 1.35rem !important;
+  letter-spacing: 0.06em;
+  color: var(--ink) !important;
+  margin: 0 0 0.85rem !important;
+  border: none !important;
+  padding: 0 !important;
+}
+
+.yg-error-message,
+.status-error p {
+  font-family: var(--font-serif) !important;
+  font-weight: 400 !important;
+  font-size: 1rem !important;
+  line-height: 1.85 !important;
+  color: var(--ink-secondary) !important;
+  margin: 0 !important;
+  overflow-wrap: anywhere;
+}
+
+.yg-error-actions {
+  margin-top: 1.6rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+}
+
+.yg-error-label {
+  font-family: var(--font-sans) !important;
+  font-size: 0.78rem !important;
+  letter-spacing: 0.08em;
+  color: var(--ink-tertiary) !important;
+  margin: 0 0 0.7rem !important;
+}
+
+.yg-error-action-list,
+.action-list {
+  list-style: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.yg-error-action-list li,
+.action-list li {
+  padding: 0.45rem 0 !important;
+  font-family: var(--font-serif) !important;
+  font-size: 0.98rem !important;
+  color: var(--ink-secondary) !important;
+  border-bottom: 1px solid var(--line);
+}
+
+.yg-error-action-list li:last-child,
+.action-list li:last-child {
+  border-bottom: none;
+}
+
+.yg-error-action-list a,
+.action-list a,
+.yg-error-text-btn {
+  color: var(--pine) !important;
+  text-decoration: none !important;
+  font-weight: 400 !important;
+  background: none !important;
+  border: none !important;
+  padding: 0 !important;
+  font-family: var(--font-serif) !important;
+  font-size: inherit !important;
+  cursor: pointer;
+}
+
+.yg-error-action-list a:hover,
+.action-list a:hover,
+.yg-error-text-btn:hover {
+  color: var(--ink) !important;
+  text-decoration: underline !important;
+  text-underline-offset: 0.2em;
+}
+
+.yg-error-help {
+  padding-top: 1.5rem !important;
+}
+
+.yg-error-help-heading,
+html.jp-minimal .yg-error-help .yg-error-help-heading,
+html.jp-minimal .section.yg-error-help h2 {
+  font-family: var(--font-serif) !important;
+  font-weight: 500 !important;
+  font-size: 1.05rem !important;
+  letter-spacing: 0.05em;
+  color: var(--ink) !important;
+  border-bottom: 1px solid var(--line) !important;
+  padding-bottom: 0.65rem !important;
+  margin: 0 0 1rem !important;
+}
+
+.yg-error-help-list {
+  list-style: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.yg-error-help-list li {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  column-gap: 0.15rem;
+  row-gap: 0.15rem;
+  padding: 0.7rem 0;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-serif) !important;
+  line-height: 1.7;
+}
+
+.yg-error-help-list li:last-child {
+  border-bottom: none;
+}
+
+.yg-error-help-term {
+  color: var(--ink) !important;
+  font-weight: 500;
+}
+
+.yg-error-help-sep {
+  color: var(--ink-tertiary);
+}
+
+.yg-error-help-desc {
+  color: var(--ink-secondary) !important;
+  font-family: var(--font-serif) !important;
+}
+
+.yg-error-cta-wrap {
+  margin: 1.75rem 0 0.25rem !important;
+}
+
+/* Sole hanko vermillion — reload CTA only */
+.yg-error-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.6rem;
+  padding: 0.55rem 1.45rem;
+  background: var(--accent) !important;
+  color: #fffefc !important;
+  border: none !important;
+  border-radius: 1px !important;
+  font-family: var(--font-sans) !important;
+  font-size: 0.88rem !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.12em;
+  cursor: pointer;
+  box-shadow: none !important;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.yg-error-cta:hover {
+  opacity: 0.92;
+}
+
+.yg-error-cta:active {
+  transform: translateY(1px);
+}
+
+.yg-error-meta {
+  font-family: var(--font-sans) !important;
+  font-size: 0.75rem !important;
+  letter-spacing: 0.04em;
+  color: var(--ink-tertiary) !important;
+  text-align: left !important;
+  padding: 0.25rem var(--page-pad-x) 1.75rem !important;
+  margin: 0 !important;
+}
+
+html.jp-minimal .section.yg-error h2,
+html.jp-minimal .section.yg-error-help h2 {
+  border-bottom-color: var(--line) !important;
+}
+
+/* ==== YUEGAO LASTCHANCE yg7 ==== */
+html.jp-minimal .yg-chrome-hide,
+html.jp-minimal .quick-copy-bar,
+html.jp-minimal .export-links-details,
+html.jp-minimal .theme-toggle,
+html.jp-minimal .public-language-switch,
+html.jp-minimal .oss-bar,
+html.jp-minimal .powered-footer,
+html.jp-minimal .stats-icon,
+html.jp-minimal .export-icon,
+html.jp-minimal .config-icon {
+  display: none !important;
+}
+
+html.jp-minimal body {
+  background: #fafaf7 !important;
+  color: #1a1a18 !important;
+  font-family: "Noto Serif SC", "Source Han Serif SC", "Songti SC", serif !important;
+  max-width: none !important;
+  padding: 0 !important;
+}
+
+html.jp-minimal .container {
+  background: #fafaf7 !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  max-width: 44rem;
+  margin: 0 auto;
+  border: none !important;
+}
+
+html.jp-minimal .header {
+  background: #fafaf7 !important;
+  background-image: none !important;
+  color: #1a1a18 !important;
+  text-align: left !important;
+  padding: 2.75rem clamp(1.1rem, 4vw, 2.5rem) 1.5rem !important;
+  border-bottom: 1px solid #e8e4dc !important;
+}
+
+html.jp-minimal .header h1 {
+  font-family: "Noto Serif SC", "Source Han Serif SC", serif !important;
+  font-weight: 500 !important;
+  font-size: clamp(1.55rem, 2.6vw, 2rem) !important;
+  color: #1a1a18 !important;
+  letter-spacing: 0.02em;
+  line-height: 1.35;
+  margin: 0.35rem 0 1rem !important;
+}
+
+html.jp-minimal .header .meta,
+html.jp-minimal .yg-meta {
+  opacity: 1 !important;
+  color: #5c5852 !important;
+  font-family: "Noto Sans SC", "PingFang SC", sans-serif !important;
+  font-size: 0.82rem !important;
+  text-align: left !important;
+}
+
+html.jp-minimal .yg-meta .meta-row {
+  display: grid;
+  grid-template-columns: 2.5rem 1fr;
+  gap: 0.65rem;
+  margin: 0.25rem 0;
+  align-items: baseline;
+}
+html.jp-minimal .yg-meta .meta-k {
+  color: #8a847c;
+  letter-spacing: 0.12em;
+}
+html.jp-minimal .yg-meta .meta-v,
+html.jp-minimal .yg-meta a.meta-v {
+  color: #1a1a18 !important;
+  text-decoration: none !important;
+  border-bottom: 1px solid #ddd7cc;
+}
+html.jp-minimal .yg-meta a.meta-v:hover {
+  border-bottom-color: #c3272b;
+}
+
+html.jp-minimal .site-nav {
+  justify-content: flex-start !important;
+  margin: 0 0 1rem !important;
+  gap: 1.25rem !important;
+}
+html.jp-minimal .site-nav-link {
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  color: #5c5852 !important;
+  font-family: "Noto Sans SC", sans-serif !important;
+  font-size: 0.78rem !important;
+  letter-spacing: 0.14em;
+  opacity: 1 !important;
+  border-bottom: 1px solid transparent !important;
+}
+html.jp-minimal .site-nav-link:hover {
+  color: #1a1a18 !important;
+  border-bottom-color: #c3272b !important;
+  background: transparent !important;
+}
+
+html.jp-minimal .section {
+  padding: 1.75rem clamp(1.1rem, 4vw, 2.5rem) !important;
+  border-bottom: 1px solid #e8e4dc !important;
+  background: transparent !important;
+}
+html.jp-minimal .section h2,
+html.jp-minimal .section-header h2 {
+  font-family: "Noto Serif SC", serif !important;
+  font-weight: 500 !important;
+  font-size: 1.15rem !important;
+  border-bottom: none !important;
+  color: #1a1a18 !important;
+  letter-spacing: 0.06em;
+}
+
+html.jp-minimal .content {
+  font-family: "Noto Serif SC", serif !important;
+  font-weight: 400 !important;
+  font-size: 1.02rem !important;
+  line-height: 1.95 !important;
+  color: #1a1a18 !important;
+}
+html.jp-minimal .content p {
+  margin: 0 0 1.25em !important;
+  text-align: justify;
+}
+
+html.jp-minimal .stats-line {
+  margin: 0 clamp(1.1rem, 4vw, 2.5rem) !important;
+  padding: 0.65rem 0 !important;
+  border: none !important;
+  border-bottom: 1px solid #e8e4dc !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  font-family: "Noto Sans SC", sans-serif !important;
+  font-size: 0.78rem !important;
+  color: #8a847c !important;
+}
+
+html.jp-minimal .calibration-warning,
+html.jp-minimal .paper-callout {
+  background: #f3f0ea !important;
+  border: 1px solid #e8e4dc !important;
+  border-left: 2px solid #8a6a2f !important;
+  border-radius: 0 !important;
+  color: #1a1a18 !important;
+  box-shadow: none !important;
+  margin: 0.75rem clamp(1.1rem, 4vw, 2.5rem) !important;
+  padding: 0.75rem 1rem !important;
+  font-family: "Noto Sans SC", sans-serif !important;
+  font-size: 0.85rem !important;
+}
+
+html.jp-minimal .recalibrate-btn,
+html.jp-minimal .copy-content-btn {
+  background: transparent !important;
+  border: 1px solid #ddd7cc !important;
+  border-radius: 1px !important;
+  color: #1a1a18 !important;
+  font-family: "Noto Sans SC", sans-serif !important;
+  font-size: 0.78rem !important;
+  letter-spacing: 0.08em;
+  box-shadow: none !important;
+  min-height: 2rem;
+}
+/* ONE hanko CTA: recalibrate */
+html.jp-minimal #recalibrateBtn.recalibrate-btn {
+  background: #c3272b !important;
+  border-color: #c3272b !important;
+  color: #fffefc !important;
+}
+
+html.jp-minimal .llm-config-details.yg-chrome-quiet {
+  margin: 0 clamp(1.1rem, 4vw, 2.5rem);
+  border: none;
+  font-family: "Noto Sans SC", sans-serif;
+  color: #8a847c;
+  font-size: 0.78rem;
+}
+html.jp-minimal .llm-config-details.yg-chrome-quiet summary {
+  list-style: none;
+  cursor: pointer;
+  letter-spacing: 0.1em;
+}
+html.jp-minimal .owner-menu-summary {
+  border: 1px solid #e8e4dc !important;
+  background: transparent !important;
+  border-radius: 1px !important;
+  color: #5c5852 !important;
+}
+
+/* Floating TOC: paper rail, hanko only on active */
+html.jp-minimal .floating-toc-container.toc-new,
+html.jp-minimal .floating-toc-container.toc-docked {
+  background: #fffefc !important;
+  border-color: #e8e4dc !important;
+  box-shadow: none !important;
+}
+html.jp-minimal .toc-item.active,
+html.jp-minimal .toc-link.active,
+html.jp-minimal a.toc-item.is-active {
+  color: #c3272b !important;
+  border-left-color: #c3272b !important;
+}
+
+/* ==== YUEGAO yg8b reading layout: centered measure + TOC outside column ==== */
+html.jp-minimal {
+  --yg-measure: 46rem; /* ~736px reading column */
+  --yg-toc-mid: 18.75rem; /* 300px */
+  --yg-toc-wide: 20rem; /* 320px */
+  --yg-toc-gap: 1.5rem;
+}
+
+/* Body is full-bleed canvas; never a fixed containing block */
+html.jp-minimal body {
+  animation: none !important;
+  transform: none !important;
+  max-width: none !important;
+  width: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: #fafaf7 !important;
+  color: #1a1a18 !important;
+  font-family: "Noto Serif SC", "Source Han Serif SC", "Songti SC", serif !important;
+}
+
+/* Article column: centered reading measure */
+html.jp-minimal .container {
+  max-width: var(--yg-measure) !important;
+  width: min(var(--yg-measure), 100%) !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  background: #fafaf7 !important;
+  box-shadow: none !important;
+  border: none !important;
+  border-radius: 0 !important;
+  overflow: visible !important;
+  animation: yg-reveal 0.45s ease-out both;
+}
+
+/* Wide: docked TOC rail — pad body so measure centers in remaining space */
+html.jp-minimal body.toc-wide-margin {
+  max-width: none !important;
+  margin: 0 !important;
+  padding-right: calc(var(--yg-toc-wide) + var(--yg-toc-gap)) !important;
+}
+html.jp-minimal .floating-toc-container.toc-docked {
+  width: var(--yg-toc-wide) !important;
+  right: 0 !important;
+  top: 0 !important;
+}
+
+/* Mid: expanded floating TOC sits in right gutter; body pads so column never runs under it */
+@media (min-width: 769px) and (max-width: 1399px) {
+  html.jp-minimal .floating-toc-container.toc-new:not(.toc-collapsed) {
+    width: var(--yg-toc-mid) !important;
+    right: 12px !important;
+    top: 5.5rem !important;
+  }
+  html.jp-minimal body:has(#floating-toc.toc-new:not(.toc-collapsed)) {
+    margin: 0 !important;
+    padding-right: calc(var(--yg-toc-mid) + var(--yg-toc-gap) + 12px) !important;
+  }
+}
+
+/* Narrow desktop: collapse TOC to indicator strip rather than overlap */
+@media (min-width: 769px) and (max-width: 1023px) {
+  html.jp-minimal .floating-toc-container.toc-new:not(.toc-docked) {
+    width: var(--toc-width-collapsed, 2.5rem) !important;
+  }
+  html.jp-minimal .floating-toc-container.toc-new:not(.toc-docked) .toc-header,
+  html.jp-minimal .floating-toc-container.toc-new:not(.toc-docked) .toc-content {
+    opacity: 0 !important;
+    pointer-events: none !important;
+  }
+  html.jp-minimal .floating-toc-container.toc-new:not(.toc-docked) .toc-indicator {
+    display: flex !important;
+    cursor: pointer;
+  }
+  html.jp-minimal body:has(#floating-toc.toc-new),
+  html.jp-minimal body:has(#floating-toc.toc-new:not(.toc-collapsed)) {
+    padding-right: 0 !important;
+  }
+}
+
+@media (max-width: 768px) {
+  html.jp-minimal body {
+    padding: 0 !important;
+  }
+  html.jp-minimal .container {
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+}
+
+
+/* === yg5: neutralize styles.css SaaS stack under paper shell === */
+html.yg-shell body,
+html.jp-minimal body,
+body.yg-home,
+body.yg-history {
+  background: var(--bg) !important;
+  background-image: none !important;
+  color: var(--ink);
+  font-family: var(--font-serif);
+}
+
+html.yg-shell .container,
+html.yg-shell.yg-history .container {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* Kill purple SaaS buttons / gradients that leak from styles.css */
+html.yg-shell .btn-primary,
+html.yg-shell button.btn-primary,
+html.yg-shell .submit-btn,
+html.yg-shell .mode-tab.active {
+  background: var(--accent) !important;
+  background-image: none !important;
+  border-color: var(--accent) !important;
+  color: #fffefc !important;
+  border-radius: var(--radius);
+  box-shadow: none !important;
+}
+
+html.yg-shell .header,
+html.yg-shell .form-container,
+html.yg-shell .card {
+  background: var(--bg-elevated);
+  border-color: var(--line);
+  box-shadow: none;
+  border-radius: var(--radius);
+}
+
+html.yg-shell .oss-bar,
+html.yg-shell [class*="powered-by"],
+html.yg-shell .export-toolbar-saas {
+  display: none !important;
+}
+
+
+/* Language switcher (paper chrome) */
+.yg-lang-switch,
+.public-language-switch.yg-lang-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: var(--font-sans);
+  font-size: 0.78rem;
+  color: var(--ink-secondary);
+}
+.yg-lang-switch .yg-lang-label { letter-spacing: 0.04em; }
+.yg-lang-switch select,
+#yg-static-lang-select {
+  appearance: none;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--ink);
+  font: inherit;
+  padding: 0.25rem 1.6rem 0.25rem 0.55rem;
+  min-height: 36px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ink-tertiary) 50%),
+    linear-gradient(135deg, var(--ink-tertiary) 50%, transparent 50%);
+  background-position: calc(100% - 12px) calc(50% - 2px), calc(100% - 7px) calc(50% - 2px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+.yg-lang-switch select:focus,
+#yg-static-lang-select:focus {
+  outline: 2px solid var(--pine);
+  outline-offset: 1px;
+}

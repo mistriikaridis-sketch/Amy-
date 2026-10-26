@@ -1,0 +1,591 @@
+"""Unit tests for the unified "timed segments" read adapter.
+
+Covers three public functions in video_transcript_api.transcriber.segments:
+- parse_time_to_seconds: tolerant time value parsing (never raises).
+- normalize_segments: raw dict/list -> canonical list[dict] with the
+  "text is never dropped" invariant.
+- load_segments: reads transcript_funasr.json / transcript_capswriter.json
+  from a cache directory and returns normalized segments.
+
+All console output in this file must be English only (no emoji, no Chinese),
+per project convention.
+"""
+
+import json
+import os
+
+import pytest
+
+from video_transcript_api.transcriber.segments import (
+    interpolate_segment_times,
+    load_segments,
+    normalize_segments,
+    parse_time_to_seconds,
+    sanitize_time_pair,
+)
+
+
+# ---------------------------------------------------------------------------
+# interpolate_segment_times
+# ---------------------------------------------------------------------------
+
+class TestInterpolateSegmentTimes:
+    def test_interpolates_by_text_length_with_contiguous_boundaries(self):
+        result = interpolate_segment_times(
+            10.0,
+            20.0,
+            ["aa", "bbbb", "c"],
+        )
+
+        assert result[0][0] == 10.0
+        assert result[-1][1] == 20.0
+        assert result[0][1] == pytest.approx(10.0 + 10.0 * 2 / 7)
+        assert result[1][0] == result[0][1]
+        assert result[1][1] == pytest.approx(10.0 + 10.0 * 6 / 7)
+        assert result[2][0] == result[1][1]
+        assert all(start < end for start, end in result)
+
+    @pytest.mark.parametrize(
+        ("start", "end"),
+        [
+            (None, 10.0),
+            (10.0, None),
+            (float("nan"), 10.0),
+            (10.0, float("inf")),
+            (10.0, 10.0),
+            (20.0, 10.0),
+        ],
+    )
+    def test_invalid_interval_returns_none_for_every_part(self, start, end):
+        assert interpolate_segment_times(start, end, ["one", "two"]) == [
+            (None, None),
+            (None, None),
+        ]
+
+    def test_single_part_preserves_valid_interval(self):
+        assert interpolate_segment_times(1.25, 9.5, ["whole"]) == [(1.25, 9.5)]
+
+    def test_single_part_with_invalid_interval_returns_none(self):
+        assert interpolate_segment_times(9.5, 1.25, ["whole"]) == [(None, None)]
+
+    def test_empty_parts_returns_empty_result(self):
+        assert interpolate_segment_times(1.0, 2.0, []) == []
+
+    def test_all_empty_parts_use_stable_equal_split(self):
+        result = interpolate_segment_times(0.0, 5.0, ["", "", ""])
+
+        assert result == [
+            (0.0, pytest.approx(5.0 / 3)),
+            (pytest.approx(5.0 / 3), pytest.approx(10.0 / 3)),
+            (pytest.approx(10.0 / 3), 5.0),
+        ]
+
+
+# ---------------------------------------------------------------------------
+# parse_time_to_seconds
+# ---------------------------------------------------------------------------
+
+class TestParseTimeToSeconds:
+    def test_float_passthrough(self):
+        assert parse_time_to_seconds(12.5) == 12.5
+
+    def test_int_converted_to_float(self):
+        assert parse_time_to_seconds(41) == 41.0
+
+    def test_zero_is_valid_not_falsy_none(self):
+        # 0 is a legitimate timestamp (start of media), must not collapse to None
+        assert parse_time_to_seconds(0) == 0.0
+        assert parse_time_to_seconds("0") == 0.0
+
+    def test_numeric_string(self):
+        assert parse_time_to_seconds("12.5") == 12.5
+
+    def test_hh_mm_ss_string(self):
+        # llm_processed.json dialogs use "00:00:41" style timestamps
+        assert parse_time_to_seconds("00:00:41") == 41.0
+        assert parse_time_to_seconds("01:02:03") == 3723.0
+
+    def test_mm_ss_string(self):
+        assert parse_time_to_seconds("02:03") == 123.0
+
+    def test_hh_mm_ss_invalid_minutes_component_returns_none(self):
+        # gate-r17 P2: "corrupted clock components must not masquerade as a
+        # real time" -- a three-segment HH:MM:SS string's minutes component
+        # must be < 60. Before this fix, "00:99:00" silently converted to
+        # 99*60 = 5940 seconds, a fabricated timestamp.
+        assert parse_time_to_seconds("00:99:00") is None
+
+    def test_hh_mm_ss_invalid_seconds_component_returns_none(self):
+        # Same rule applied to the seconds component of a three-segment
+        # HH:MM:SS string: "00:00:99" used to silently convert to 99 seconds.
+        assert parse_time_to_seconds("00:00:99") is None
+
+    def test_hh_mm_ss_unbounded_hours_component_is_valid(self):
+        # Only minutes/seconds are clock-bounded; hours has no upper bound
+        # (a long recording can legitimately exceed 99 hours).
+        assert parse_time_to_seconds("120:00:00") == 432000.0
+
+    def test_mm_ss_invalid_seconds_component_returns_none(self):
+        # Two-segment MM:SS: seconds must be < 60. "00:99" used to silently
+        # convert to 99 seconds.
+        assert parse_time_to_seconds("00:99") is None
+
+    def test_mm_ss_unbounded_minutes_component_is_valid(self):
+        # Minutes has no upper bound in the two-segment MM:SS form -- this is
+        # a legitimate "total minutes" representation (e.g. from a duration
+        # counter), unlike the three-segment HH:MM:SS clock form.
+        assert parse_time_to_seconds("125:30") == 7530.0
+
+    def test_none_returns_none(self):
+        assert parse_time_to_seconds(None) is None
+
+    def test_empty_string_returns_none(self):
+        assert parse_time_to_seconds("") is None
+        assert parse_time_to_seconds("   ") is None
+
+    def test_garbage_string_returns_none(self):
+        assert parse_time_to_seconds("not-a-time") is None
+        assert parse_time_to_seconds("aa:bb:cc") is None
+
+    def test_negative_number_returns_none(self):
+        assert parse_time_to_seconds(-5) is None
+        assert parse_time_to_seconds(-5.0) is None
+        assert parse_time_to_seconds("-5") is None
+
+    def test_negative_hhmmss_string_returns_none(self):
+        assert parse_time_to_seconds("-1:02:03") is None
+
+    def test_mixed_sign_component_with_positive_total_returns_none(self):
+        """A malformed timestamp with one negative component can still sum to
+        a positive total ("01:-01:00" -> 3600 - 60 + 0 = 3540s) and previously
+        slipped through a total-only sign check. Each component must be
+        validated individually -- any component carrying a literal minus
+        sign is illegal, regardless of the resulting total's sign."""
+        assert parse_time_to_seconds("01:-01:00") is None
+
+    def test_negative_leading_zero_component_returns_none(self):
+        """"-00" parses to -0.0, which is numerically NOT less than 0 under
+        IEEE 754 (-0.0 == 0.0), so a naive per-component `value < 0` check
+        after float() conversion would miss it -- the minus sign must be
+        detected before/independent of the numeric comparison (e.g. at the
+        string level). Regression guard: this component-level fix must not
+        regress this already-illegal-looking timestamp back to being
+        accepted."""
+        assert parse_time_to_seconds("-00:01:00") is None
+
+    def test_negative_seconds_component_mm_ss_returns_none(self):
+        """MM:SS form with a negative seconds component: total-sum check
+        already rejects these (regression lock, unaffected by the
+        component-level fix)."""
+        assert parse_time_to_seconds("00:-1") is None
+        assert parse_time_to_seconds("00:-01") is None
+
+    def test_bool_returns_none(self):
+        # bool is a subclass of int in Python -- must not be silently
+        # treated as 1/0 seconds.
+        assert parse_time_to_seconds(True) is None
+        assert parse_time_to_seconds(False) is None
+
+    def test_wrong_number_of_colon_parts_returns_none(self):
+        assert parse_time_to_seconds("1:2:3:4") is None
+        assert parse_time_to_seconds(":") is None
+
+    def test_garbage_type_returns_none(self):
+        assert parse_time_to_seconds([1, 2, 3]) is None
+        assert parse_time_to_seconds({"a": 1}) is None
+
+    def test_never_raises_on_any_input(self):
+        # Defensive sweep across weird inputs -- must not throw.
+        for value in (object(), b"bytes", float("nan"), float("inf")):
+            parse_time_to_seconds(value)
+
+    def test_non_finite_float_returns_none(self):
+        # float('inf')/nan must never be treated as a valid timestamp --
+        # downstream int(inf) conversions would crash otherwise.
+        assert parse_time_to_seconds(float("inf")) is None
+
+    def test_huge_int_overflow_returns_none(self):
+        # JSON allows integers of arbitrary precision -- json.loads() can hand
+        # back a Python int like 10**400. float(10**400) raises OverflowError
+        # ("int too large to convert to float"), which would violate this
+        # function's "never raises" contract if left uncaught.
+        assert parse_time_to_seconds(10 ** 400) is None
+        assert parse_time_to_seconds(float("-inf")) is None
+        assert parse_time_to_seconds(float("nan")) is None
+
+    def test_non_finite_string_returns_none(self):
+        assert parse_time_to_seconds("inf") is None
+        assert parse_time_to_seconds("-inf") is None
+        assert parse_time_to_seconds("nan") is None
+
+    def test_overflowing_numeric_string_returns_none(self):
+        # float("1e309") silently overflows to inf in Python (no exception);
+        # must be caught by the finiteness check rather than accepted as a
+        # huge-but-valid timestamp.
+        assert parse_time_to_seconds("1e309") is None
+        assert parse_time_to_seconds("-1e309") is None
+
+    # -- gate-r25 P2: clock components must be plain digit strings, not --
+    # -- anything float() happens to accept (decimals / sci-notation /  --
+    # -- underscore digit grouping) -- except the trailing seconds      --
+    # -- component, which may carry an optional decimal fraction.      --
+
+    def test_decimal_hours_component_returns_none(self):
+        # "0.5:00:00" -- a non-last (hours) component with a decimal point.
+        # float("0.5") happily parses to 0.5, so before this fix this
+        # silently became 0.5*3600 = 1800.0 seconds -- a fabricated time from
+        # a component that is not the legal trailing "seconds" position.
+        assert parse_time_to_seconds("0.5:00:00") is None
+
+    def test_scientific_notation_component_returns_none(self):
+        # "1e2:00" -- a non-last (minutes) component in scientific notation.
+        # float("1e2") == 100.0, so before this fix this silently became
+        # 100*60 = 6000.0 seconds.
+        assert parse_time_to_seconds("1e2:00") is None
+
+    def test_underscore_digit_grouping_component_returns_none(self):
+        # "1_0:00" -- Python's float() accepts PEP 515 digit-grouping
+        # underscores in numeric strings (float("1_0") == 10.0), so before
+        # this fix this silently became 10*60 = 600.0 seconds.
+        assert parse_time_to_seconds("1_0:00") is None
+
+    def test_trailing_seconds_component_with_decimal_fraction_is_valid(self):
+        # The one deliberate exception: the last (seconds) component may
+        # carry a decimal fraction -- "00:01:23.4" is a legitimate
+        # sub-second-precision timestamp and must still resolve to 83.4,
+        # not be rejected by the new stricter per-component check.
+        assert parse_time_to_seconds("00:01:23.4") == 83.4
+
+    def test_non_last_component_with_decimal_fraction_still_rejected(self):
+        # The decimal-fraction exception is scoped to the trailing
+        # (seconds) component only -- "01:23.4:00" (decimal in the middle
+        # "minutes" slot of a 3-part HH:MM:SS string) must still be
+        # rejected, confirming the exception isn't accidentally applied to
+        # every component.
+        assert parse_time_to_seconds("01:23.4:00") is None
+
+
+# ---------------------------------------------------------------------------
+# normalize_segments
+# ---------------------------------------------------------------------------
+
+class TestNormalizeSegments:
+    def test_production_funasr_format_start_end_time(self):
+        # Real production shape: top-level dict with "segments", fields
+        # named start_time/end_time (float seconds), plus speaker/words.
+        raw = {
+            "segments": [
+                {
+                    "start_time": 0.0,
+                    "end_time": 3.2,
+                    "text": "hello world",
+                    "speaker": "SPEAKER_00",
+                    "words": [{"word": "hello", "start": 0.0, "end": 0.5}],
+                }
+            ]
+        }
+        result = normalize_segments(raw)
+        assert result == [
+            {
+                "start_time": 0.0,
+                "end_time": 3.2,
+                "text": "hello world",
+                "speaker": "SPEAKER_00",
+            }
+        ]
+
+    def test_legacy_start_end_naming(self):
+        # Repo's own old test fixtures use "start"/"end" (no _time suffix).
+        raw = {
+            "segments": [
+                {"start": 1.0, "end": 2.5, "text": "legacy segment"},
+            ]
+        }
+        result = normalize_segments(raw)
+        assert result == [
+            {"start_time": 1.0, "end_time": 2.5, "text": "legacy segment"}
+        ]
+
+    def test_hh_mm_ss_string_time(self):
+        raw = [{"start_time": "00:00:41", "end_time": "00:00:45", "text": "hi"}]
+        result = normalize_segments(raw)
+        assert result == [{"start_time": 41.0, "end_time": 45.0, "text": "hi"}]
+
+    def test_bad_time_keeps_text_sets_time_none(self):
+        # The "text is never lost" law: broken/missing time must not drop
+        # the segment, only null out the offending timestamp.
+        raw = [
+            {"start_time": None, "end_time": 5.0, "text": "start missing"},
+            {"start_time": -1, "end_time": 5.0, "text": "negative start"},
+            {"start_time": "garbage", "end_time": 5.0, "text": "garbage start"},
+        ]
+        result = normalize_segments(raw)
+        assert result == [
+            {"start_time": None, "end_time": 5.0, "text": "start missing"},
+            {"start_time": None, "end_time": 5.0, "text": "negative start"},
+            {"start_time": None, "end_time": 5.0, "text": "garbage start"},
+        ]
+
+    def test_missing_speaker_not_fabricated(self):
+        # No "unknown" placeholder -- key must simply be absent.
+        raw = [{"start_time": 0.0, "end_time": 1.0, "text": "no speaker field"}]
+        result = normalize_segments(raw)
+        assert result == [{"start_time": 0.0, "end_time": 1.0, "text": "no speaker field"}]
+        assert "speaker" not in result[0]
+
+    def test_bare_list_input(self):
+        raw = [{"start_time": 0.0, "end_time": 1.0, "text": "bare list"}]
+        result = normalize_segments(raw)
+        assert result == [{"start_time": 0.0, "end_time": 1.0, "text": "bare list"}]
+
+    def test_wrapped_dict_input(self):
+        raw = {"segments": [{"start_time": 0.0, "end_time": 1.0, "text": "wrapped"}]}
+        result = normalize_segments(raw)
+        assert result == [{"start_time": 0.0, "end_time": 1.0, "text": "wrapped"}]
+
+    def test_empty_text_entries_are_skipped(self):
+        raw = [
+            {"start_time": 0.0, "end_time": 1.0, "text": ""},
+            {"start_time": 1.0, "end_time": 2.0, "text": "   "},
+            {"start_time": 2.0, "end_time": 3.0},  # missing text key entirely
+            {"start_time": 3.0, "end_time": 4.0, "text": "kept"},
+        ]
+        result = normalize_segments(raw)
+        assert result == [{"start_time": 3.0, "end_time": 4.0, "text": "kept"}]
+
+    def test_empty_list_returns_none(self):
+        assert normalize_segments([]) is None
+        assert normalize_segments({"segments": []}) is None
+
+    def test_all_invalid_entries_returns_none(self):
+        raw = [{"start_time": 0.0, "end_time": 1.0, "text": ""}]
+        assert normalize_segments(raw) is None
+
+    def test_none_input_returns_none(self):
+        assert normalize_segments(None) is None
+
+    def test_malformed_top_level_returns_none(self):
+        assert normalize_segments("not a dict or list") is None
+        assert normalize_segments({"no_segments_key": []}) is None
+        assert normalize_segments({"segments": "not a list"}) is None
+
+    def test_non_dict_items_are_skipped(self):
+        raw = ["not a dict", {"start_time": 0.0, "end_time": 1.0, "text": "kept"}]
+        result = normalize_segments(raw)
+        assert result == [{"start_time": 0.0, "end_time": 1.0, "text": "kept"}]
+
+    def test_reversed_interval_nulls_end_time_via_sanitize_time_pair(self):
+        """The three subtitle-extraction paths (youtube-transcript-api /
+        TikHub XML / SRT) all run their start/end pair through
+        sanitize_time_pair before handing it off -- this central adapter
+        must apply the exact same cleaning, not let a reversed interval
+        (end < start) leak through to downstream consumers unchanged."""
+        raw = [{"start_time": 10, "end_time": 5, "text": "reversed interval"}]
+        result = normalize_segments(raw)
+        assert result == [
+            {"start_time": 10.0, "end_time": None, "text": "reversed interval"}
+        ]
+
+    def test_normal_interval_unaffected_by_sanitize_time_pair(self):
+        raw = [{"start_time": 1.0, "end_time": 4.0, "text": "normal"}]
+        result = normalize_segments(raw)
+        assert result == [{"start_time": 1.0, "end_time": 4.0, "text": "normal"}]
+
+
+# ---------------------------------------------------------------------------
+# sanitize_time_pair (authoritative home: this module; downloaders/
+# subtitle_types.py re-exports it for backward-compatible import paths)
+# ---------------------------------------------------------------------------
+
+class TestSanitizeTimePairLivesInSegmentsModule:
+    def test_importable_and_reverses_end_to_none(self):
+        assert sanitize_time_pair(5.0, 3.0) == (5.0, None)
+
+    def test_valid_pair_untouched(self):
+        assert sanitize_time_pair(1.0, 4.0) == (1.0, 4.0)
+
+
+# ---------------------------------------------------------------------------
+# load_segments
+# ---------------------------------------------------------------------------
+
+class TestLoadSegments:
+    def test_loads_from_transcript_funasr_json(self, tmp_path):
+        data = {
+            "segments": [
+                {"start_time": 0.0, "end_time": 1.0, "text": "funasr segment", "speaker": "S0"}
+            ]
+        }
+        (tmp_path / "transcript_funasr.json").write_text(
+            json.dumps(data, ensure_ascii=False), encoding="utf-8"
+        )
+        result = load_segments(tmp_path)
+        assert result == [
+            {"start_time": 0.0, "end_time": 1.0, "text": "funasr segment", "speaker": "S0"}
+        ]
+
+    def test_loads_from_transcript_capswriter_json_when_funasr_absent(self, tmp_path):
+        data = {"segments": [{"start_time": 0.0, "end_time": 1.0, "text": "capswriter segment"}]}
+        (tmp_path / "transcript_capswriter.json").write_text(
+            json.dumps(data, ensure_ascii=False), encoding="utf-8"
+        )
+        result = load_segments(tmp_path)
+        assert result == [{"start_time": 0.0, "end_time": 1.0, "text": "capswriter segment"}]
+
+    def test_funasr_takes_priority_over_capswriter(self, tmp_path):
+        funasr_data = {"segments": [{"start_time": 0.0, "end_time": 1.0, "text": "from funasr"}]}
+        capswriter_data = {"segments": [{"start_time": 0.0, "end_time": 1.0, "text": "from capswriter"}]}
+        (tmp_path / "transcript_funasr.json").write_text(
+            json.dumps(funasr_data, ensure_ascii=False), encoding="utf-8"
+        )
+        (tmp_path / "transcript_capswriter.json").write_text(
+            json.dumps(capswriter_data, ensure_ascii=False), encoding="utf-8"
+        )
+        result = load_segments(tmp_path)
+        assert result == [{"start_time": 0.0, "end_time": 1.0, "text": "from funasr"}]
+
+    def test_missing_files_returns_none(self, tmp_path):
+        assert load_segments(tmp_path) is None
+
+    def test_corrupted_json_returns_none(self, tmp_path):
+        (tmp_path / "transcript_funasr.json").write_text("{not valid json", encoding="utf-8")
+        assert load_segments(tmp_path) is None
+
+    def test_corrupted_funasr_falls_back_to_valid_capswriter(self, tmp_path):
+        # Design decision: a broken/empty primary source is treated as "no
+        # data available there", so the adapter tries the next-priority
+        # source rather than giving up immediately.
+        (tmp_path / "transcript_funasr.json").write_text("{not valid json", encoding="utf-8")
+        capswriter_data = {"segments": [{"start_time": 0.0, "end_time": 1.0, "text": "fallback"}]}
+        (tmp_path / "transcript_capswriter.json").write_text(
+            json.dumps(capswriter_data, ensure_ascii=False), encoding="utf-8"
+        )
+        result = load_segments(tmp_path)
+        assert result == [{"start_time": 0.0, "end_time": 1.0, "text": "fallback"}]
+
+    def test_txt_only_capswriter_returns_none(self, tmp_path):
+        # transcript_capswriter.txt has no timing info at all; not a
+        # supported segment source (json only).
+        (tmp_path / "transcript_capswriter.txt").write_text("plain text, no timing", encoding="utf-8")
+        assert load_segments(tmp_path) is None
+
+    def test_invalid_utf8_in_funasr_falls_back_to_valid_capswriter(self, tmp_path):
+        # UnicodeDecodeError is a ValueError subclass, NOT an OSError, so the
+        # bare (OSError, json.JSONDecodeError) except tuple used to miss it and
+        # let it propagate uncaught -- violating this module's "never raises"
+        # contract. A corrupt primary source must be treated the same as a
+        # missing/malformed one: fall back to the next-priority source.
+        (tmp_path / "transcript_funasr.json").write_bytes(
+            b'{"segments": [{"start_time": 0.0, "end_time": 1.0, "text": "bad \xff\xfe byte"}]}'
+        )
+        capswriter_data = {
+            "segments": [{"start_time": 0.0, "end_time": 1.0, "text": "fallback ok"}]
+        }
+        (tmp_path / "transcript_capswriter.json").write_text(
+            json.dumps(capswriter_data, ensure_ascii=False), encoding="utf-8"
+        )
+        result = load_segments(tmp_path)
+        assert result == [{"start_time": 0.0, "end_time": 1.0, "text": "fallback ok"}]
+
+    def test_invalid_utf8_only_returns_none_without_raising(self, tmp_path):
+        (tmp_path / "transcript_funasr.json").write_bytes(
+            b'{"segments": [{"start_time": 0.0, "end_time": 1.0, "text": "bad \xff\xfe byte"}]}'
+        )
+        assert load_segments(tmp_path) is None
+
+    def test_deeply_nested_json_recursion_error_returns_none_without_raising(self, tmp_path):
+        # gate-r17 P3: json.load() on pathologically deep nesting raises
+        # RecursionError, which is a RuntimeError subclass -- NOT covered by
+        # the (OSError, json.JSONDecodeError, UnicodeDecodeError) except
+        # tuple. Before this fix, this would propagate uncaught, violating
+        # this module's "never raises, fall back to the next source" contract.
+        deeply_nested = "[" * 100_000 + "]" * 100_000
+        (tmp_path / "transcript_funasr.json").write_text(deeply_nested, encoding="utf-8")
+        assert load_segments(tmp_path) is None
+
+    def test_deeply_nested_json_falls_back_to_valid_capswriter(self, tmp_path):
+        # Same as other corrupted-primary-source cases: a RecursionError on
+        # transcript_funasr.json must not block falling back to a valid
+        # transcript_capswriter.json.
+        deeply_nested = "[" * 100_000 + "]" * 100_000
+        (tmp_path / "transcript_funasr.json").write_text(deeply_nested, encoding="utf-8")
+        capswriter_data = {
+            "segments": [{"start_time": 0.0, "end_time": 1.0, "text": "fallback ok"}]
+        }
+        (tmp_path / "transcript_capswriter.json").write_text(
+            json.dumps(capswriter_data, ensure_ascii=False), encoding="utf-8"
+        )
+        result = load_segments(tmp_path)
+        assert result == [{"start_time": 0.0, "end_time": 1.0, "text": "fallback ok"}]
+
+    def test_int_digit_limit_value_error_falls_back_to_valid_capswriter(self, tmp_path):
+        # gate-r26 P2: Python 3.11+ enforces a 4300-digit limit on int<->str
+        # conversion (bpo-95778 / sys.set_int_max_str_digits). json.load() on
+        # a document containing an integer literal with more digits than
+        # that raises a BARE ValueError deep inside int() parsing -- NOT a
+        # json.JSONDecodeError, even though JSONDecodeError is itself a
+        # ValueError subclass. An except tuple that only lists
+        # json.JSONDecodeError (rather than the broader ValueError) misses
+        # this case entirely, so it used to propagate uncaught and break
+        # this module's "never raises, fall back to the next source"
+        # contract. The corrupted primary source must be treated the same
+        # as any other malformed one: fall back to the next-priority source.
+        huge_digits = "9" * 5000
+        (tmp_path / "transcript_funasr.json").write_text(
+            '{"segments": [{"start_time": ' + huge_digits + ', "end_time": 1.0, "text": "huge int"}]}',
+            encoding="utf-8",
+        )
+        capswriter_data = {
+            "segments": [{"start_time": 0.0, "end_time": 1.0, "text": "fallback ok"}]
+        }
+        (tmp_path / "transcript_capswriter.json").write_text(
+            json.dumps(capswriter_data, ensure_ascii=False), encoding="utf-8"
+        )
+        result = load_segments(tmp_path)
+        assert result == [{"start_time": 0.0, "end_time": 1.0, "text": "fallback ok"}]
+
+    def test_int_digit_limit_value_error_only_returns_none_without_raising(self, tmp_path):
+        # Same trigger as above, but with no fallback source available: must
+        # degrade to None rather than raising.
+        huge_digits = "9" * 5000
+        (tmp_path / "transcript_funasr.json").write_text(
+            '{"segments": [{"start_time": ' + huge_digits + ', "end_time": 1.0, "text": "huge int"}]}',
+            encoding="utf-8",
+        )
+        assert load_segments(tmp_path) is None
+
+    def test_unreadable_cache_dir_returns_none_without_raising(self, tmp_path):
+        # gate-r19 P2: Path.exists() only silently swallows ENOENT/ENOTDIR-style
+        # errors -- it re-raises PermissionError (EACCES). The previous
+        # implementation called `file_path.exists()` OUTSIDE the try block, so
+        # a cache directory whose parent lacks the execute bit (unreadable by
+        # this process, e.g. a permissions misconfiguration in production)
+        # would make load_segments() raise PermissionError instead of
+        # returning None, violating this module's "never raises" contract.
+        locked_dir = tmp_path / "locked_cache"
+        locked_dir.mkdir()
+        # A file need not actually exist inside locked_dir -- the point is
+        # that *stat'ing* anything under it fails once the directory itself
+        # is inaccessible (its execute/search bit is required to resolve any
+        # path beneath it).
+        os.chmod(locked_dir, 0o000)
+        try:
+            probe = locked_dir / "transcript_funasr.json"
+            try:
+                probe.exists()
+            except PermissionError:
+                pass
+            else:
+                # chmod 0o000 did not actually block traversal in this
+                # environment (e.g. running as root, where the kernel's
+                # permission checks are bypassed) -- the experiment is moot,
+                # skip rather than reporting a false pass.
+                pytest.skip(
+                    "chmod 0o000 did not block directory access in this "
+                    "environment (likely running as root); cannot exercise "
+                    "the PermissionError path"
+                )
+            assert load_segments(locked_dir) is None
+        finally:
+            # Restore access so pytest's tmp_path cleanup can remove the dir.
+            os.chmod(locked_dir, 0o755)

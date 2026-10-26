@@ -1,0 +1,90 @@
+﻿[project]
+name = "video-transcript-api"
+version = "1.3.0"
+description = "阅稿：VideoTranscriptAPI 的本地阅读向 fork（PolyForm Noncommercial）"
+requires-python = ">=3.11"
+dependencies = [
+    "beautifulsoup4>=4.9.0",
+    "capswriter-asr",
+    "commentjson>=0.9.0",
+    "fastapi>=0.115.0",
+    "ffmpeg-python>=0.2.0",
+    "jinja2>=3.0.0",
+    "keyboard==0.13.5",
+    "llm-compat",
+    "loguru==0.7.0",
+    "markdown>=3.4.0",
+    "nh3>=0.2.0",
+    "numpy==1.24.3",
+    "pillow>=12.3.0",
+    "propcache==0.3.1",
+    "pyclip>=0.7.0",
+    "pydantic>=2.1.1",
+    "pydub==0.25.1",
+    "pymdown-extensions>=10.0.0",
+    "pypinyin>=0.55.0",
+    "python-multipart>=0.0.6",
+    "requests>=2.32.2",
+    "rich>=10.0.0",
+    "sounddevice>=0.5.3",
+    "srt>=3.5.3",
+    "typer==0.9.0",
+    "uvicorn>=0.29.0",
+    "watchdog>=6.0.0",
+    "websocket-client==1.5.1",
+    "websockets>=13.0",
+    "wecom-notifier>=0.3.2",
+    "youtube-transcript-api>=1.2.3",
+    "yt-dlp[default]>=2025.12.8",
+    "zlx-ops-sdk>=0.1,<0.2",
+]
+
+[project.optional-dependencies]
+perf = [
+    "aiohttp==3.9.5",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.21.0",
+    "fonttools>=4.53.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+# Exclude manual/ from auto-discovery
+norecursedirs = ["manual", ".git", "__pycache__", "data"]
+markers = [
+    "unit: Unit tests (fast, no I/O)",
+    "integration: Integration tests (may require services)",
+    "slow: Slow tests (network, large data)",
+    "network: tests that hit real external services",
+]
+addopts = "-q --strict-markers"
+# 门禁承诺：不允许有测试用「返回值」表达判定（pytest 9 不检查测试函数返回值，
+# `return True/False` 会被静默丢弃 → 恒绿）。只承诺这一条；它抓不到吞异常后隐式返回
+# None 的 print 型测试、写在 except 里的 assert、unittest.TestCase 方法的返回值，
+# 以及本身无意义的断言（assert True）。故不设豁免白名单——白名单会成为新的腐化点。
+filterwarnings = [
+    "error::pytest.PytestReturnNotNoneWarning",
+]
+
+[tool.coverage.run]
+source = ["src/video_transcript_api"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+exclude_also = [
+    "if __name__ == .__main__.",
+]
+
+[tool.uv.sources]
+capswriter-asr = { path = "C:/Users/Ashley/agent-tools/vta-install/deps/CapsWriter-ASR-Server/sdk" }
+llm-compat = { path = "C:/Users/Ashley/agent-tools/vta-install/deps/llm-compat" }
+

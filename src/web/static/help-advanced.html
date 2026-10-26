@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light" class="yg-shell">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>阅稿 · 进阶</title>
+  <meta name="theme-color" content="#fafaf7">
+  <meta name="robots" content="noindex">
+  <link rel="stylesheet" href="/static/css/view-japanese-minimal.css?v=yg7">
+</head>
+<body class="yg-help">
+  <header class="yg-mast">
+    <a class="yg-brand" href="/">
+      <span class="yg-seal" aria-hidden="true">阅</span>
+      <span class="yg-brand-name">阅稿</span>
+    </a>
+    <label class="yg-lang-switch" style="margin-inline-end:.5rem"><span class="yg-lang-label">Language</span>
+      <select id="yg-static-lang-select" aria-label="Language"></select></label>
+      <nav class="yg-mast-links" aria-label="主导航">
+      <a href="/">首页</a>
+      <a href="/add_task_by_web">开始</a>
+      <a href="/static/history.html">历史</a>
+      <a href="/static/help-advanced.html" aria-current="page">进阶</a>
+    </nav>
+  </header>
+
+  <div class="wrap">
+    <a class="back" href="/">← 返回首页</a>
+    <h1>进阶说明</h1>
+    <p>普通用户请走首页三步：粘贴 / 开始 / 打开阅读页。下面给脚本与自建环境。</p>
+
+    <h2>1. 健康检查</h2>
+    <pre>curl -s http://127.0.0.1:8200/livez
+curl -s http://127.0.0.1:8200/health</pre>
+    <p><code>/livez</code> 只表示进程活着。<code>/health</code> 会查 SQLite、磁盘、可选 ASR；CapsWriter / FunASR / LLM 未配置时出现 <code>degraded</code> 是预期降级，不代表首页不可用。</p>
+
+    <h2>2. 提交任务（API）</h2>
+    <pre>curl -s -X POST http://127.0.0.1:8200/transcribe \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: YOUR_KEY" \
+  -d '{"url":"https://example.com/video"}'</pre>
+    <p>Key 写在 <code>config/users.json</code>；切勿把真实密钥放进仓库。</p>
+
+    <h2>3. 环境与配置</h2>
+    <ul>
+      <li>主配置：<code>config/config.jsonc</code>（可参考 <code>config/config.example.jsonc</code>）</li>
+      <li>部署环境变量样例：<code>docker/ops.env.example</code>、<code>.env.example</code></li>
+      <li>产品显示名：环境变量 <code>VTA_APP_NAME</code> 或 <code>APP_NAME</code>（默认「阅稿」）</li>
+      <li>OpenAPI：<a href="/docs">/docs</a></li>
+    </ul>
+
+    <h2>4. 两条路径怎么选</h2>
+    <ul>
+      <li><strong>普通用户</strong>：首页 → 开始 → 阅读页 / 历史</li>
+      <li><strong>进阶用户</strong>：本页 + <code>/docs</code> + 配置文件；不依赖聊天 Agent</li>
+    </ul>
+
+    <h2>5. ASR 降级（CapsWriter 可选）</h2>
+    <p>没有 CapsWriter 也能用。推荐顺序：</p>
+    <ol>
+      <li><strong>Path A</strong>：Amy（或其它工具）先出 Markdown/纯文本 → 导入 VTA → 打开 <code>/view/{token}</code>。</li>
+      <li><strong>local_whisper</strong>：在 <code>config.jsonc</code> 启用 <code>local_whisper</code>，并用环境变量指定带 Whisper 的解释器：
+        <pre>LOCAL_WHISPER_PYTHON=C:\Path\to\python.exe
+AMY_PYTHON=C:\Path\to\Amy\venv\Scripts\python.exe</pre>
+        解析顺序：配置里的 <code>local_whisper.python</code> → <code>LOCAL_WHISPER_PYTHON</code> → <code>AMY_PYTHON</code> → 本机候选。
+      </li>
+      <li><strong>Path B（可选）</strong>：自建 CapsWriter / FunASR 后再走完整 URL 转写。</li>
+    </ol>
+    <p>详情见仓库 <code>docs/guides/asr-degrade.md</code> 与 <code>SECURITY.md</code>。</p>
+
+    <h2>6. 已知限制（摘要）</h2>
+    <ul>
+      <li><code>/view</code> 链接拿到即可读；局域网勿裸暴露公网。</li>
+      <li>章节时间戳为 segment 反查的<strong>近似</strong>值。</li>
+      <li>飞书 / TikHub 未配置则跳过；公开 CI 不做分钟级 E2E。</li>
+    </ul>
+
+  </div>
+<script src="/static/js/lang-boot.js?v=yg-lang1"></script>
+<script>(function(){var lang=window.__VTA_UI_LANG_BOOT__||"";var src=lang?("/i18n.js?lang="+encodeURIComponent(lang)):"/i18n.js";document.write('<script src="'+src+'"><\/script>');})();</script>
+<script src="/static/js/i18n.js?v=yg-lang1"></script>
+<script>document.addEventListener("DOMContentLoaded",function(){if(window.applyI18n)window.applyI18n();if(window.ygMountLanguageSwitcher)window.ygMountLanguageSwitcher();});</script>
+</body>
+</html>

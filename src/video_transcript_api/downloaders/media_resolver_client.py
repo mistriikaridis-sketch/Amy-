@@ -1,0 +1,361 @@
+"""MediaResolverAPI HTTP 客户端。
+
+把"短视频 URL → 无水印直链 + 元数据"的解析外包给专用 MediaResolverAPI 服务。
+本客户端只负责一次 `POST /api/resolve` 调用与 HTTP/响应到项目异常的映射，
+不做缓存、不做 SSRF 校验、不下载文件（这些由 MediaResolverDownloader 负责）。
+
+契约（与 MediaResolverAPI 对齐，详见 docs/designs/media-resolver-integration.md）:
+    POST {base_url}/api/resolve
+    Header: X-API-Key: <api_key>
+    Body:   {"url": str, "translate": bool, "force_refresh": bool}
+    200 success=true:  {"success": true, "data": {platform, video_id, title,
+                        author_name, video_url, width, height, duration, provider, ...}}
+    200 success=false: {"success": false, "error": {"code": str, "message": str}}
+
+异常映射见 Error & Rescue Registry（设计文档）。
+"""
+
+import base64
+import re
+import time
+from typing import Optional
+
+import requests
+
+from ..errors import (
+    NetworkError,
+    ResolverAuthError,
+    ResolverServerError,
+    InvalidURLError,
+    NonVideoContentError,
+    ResolverResolveError,
+    ResolverResponseError,
+)
+from ..utils.logging import setup_logger
+
+logger = setup_logger("media_resolver_client")
+
+# success=false 时，error.code 到异常的判定契约。
+# 终态（图文/删除/私密）→ NonVideoContentError；其余业务失败 → ResolverResolveError。
+# ⚠️ 若 MediaResolverAPI 暂未提供 error.code，回退到文案关键词粗分（见 _classify_failure）。
+_NON_VIDEO_CODES = {
+    "NON_VIDEO_CONTENT",
+    "IMAGE_TEXT",
+    "IMAGE_POST",
+    "NO_VIDEO",
+    "DELETED",
+    "NOT_FOUND",
+    "PRIVATE",
+    "UNAVAILABLE",
+}
+_RESOLVE_FAIL_CODES = {
+    "ALL_SOURCES_FAILED",
+    "RESOLVE_FAILED",
+    "PROVIDER_ERROR",
+}
+# 视频号 sph_code：与 resolver 路径约束一致（1-64 位字母数字）
+_WECHAT_SPH_CODE_RE = re.compile(r"^[A-Za-z0-9]{1,64}$")
+
+# 文案兜底关键词（服务只回 message、无 code 时使用）
+_NON_VIDEO_KEYWORDS = (
+    "图文", "图片", "无视频", "已删除", "删除", "私密", "不存在", "下架",
+    "image", "no video", "deleted", "private", "not found", "unavailable",
+)
+
+
+# X Space 回放终态文案关键词（与 MediaResolverAPI v2 交付协议对齐）。
+# 平台标记：对方 resolve 的两条失败链都会把 platform 名印进 error 字符串
+# （终态："... for platform 'twitter_space' ... is not a replay (live_status=is_live)"；
+#  全源失败："All providers failed for platform 'twitter_space' ... replay is disabled"）。
+# 只在带该标记时启用本组映射，避免其它平台含相同词汇的报错被改写。
+_SPACE_ERROR_MARKERS = ("twitter_space", "twitter space")
+# 未开播（is_upcoming）与 live_status 缺失也归这一类：都不是可回放状态。
+_SPACE_NOT_REPLAYABLE_MARKERS = ("is_live", "is_upcoming", "live_status=missing", "is not a replay")
+_SPACE_UNAVAILABLE_MARKERS = ("replay is disabled", "no longer available", "not available")
+
+
+class MediaResolverClient:
+    """MediaResolverAPI 解析客户端（requests 实现，超时/退避复用现有风格）。"""
+
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        timeout: int = 30,
+        max_retries: int = 2,
+        retry_delay: int = 2,
+    ):
+        if not base_url:
+            raise ValueError("media_resolver.base_url 未配置")
+        if not api_key:
+            raise ValueError("media_resolver.api_key 未配置")
+        # 去掉末尾斜杠，避免拼出 //api/resolve
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key.strip()
+        self.timeout = timeout
+        self.max_retries = max(1, int(max_retries))
+        self.retry_delay = retry_delay
+
+    @property
+    def resolve_endpoint(self) -> str:
+        return f"{self.base_url}/api/resolve"
+
+    def resolve(
+        self,
+        url: str,
+        translate: bool = False,
+        force_refresh: bool = False,
+    ) -> dict:
+        """解析单条 URL，返回 data 字典（含 video_url 等）。
+
+        Args:
+            url: 待解析的短视频 URL
+            translate: 是否翻译中文描述（v1 默认 False）
+            force_refresh: 是否强制刷新解析（仅在下载 403/失效时为 True）
+
+        Returns:
+            dict: 解析成功的 data 字段（保证含非空 video_url）
+
+        Raises:
+            ResolverAuthError / InvalidURLError / NonVideoContentError /
+            ResolverResolveError / ResolverResponseError / ResolverServerError /
+            NetworkError: 见 Error & Rescue Registry
+        """
+        headers = {"X-API-Key": self.api_key, "Accept": "application/json"}
+        payload = {
+            "url": url,
+            "translate": translate,
+            "force_refresh": force_refresh,
+        }
+
+        last_network_error: Optional[Exception] = None
+
+        for attempt in range(1, self.max_retries + 1):
+            logger.info(
+                f"resolve request (attempt {attempt}/{self.max_retries}): "
+                f"{self.resolve_endpoint} url={url[:80]} force_refresh={force_refresh}"
+            )
+            try:
+                response = requests.post(
+                    self.resolve_endpoint,
+                    json=payload,
+                    headers=headers,
+                    timeout=self.timeout,
+                )
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                # 服务不可达：超时/连接拒绝/DNS → 可重试网络错误
+                last_network_error = e
+                logger.warning(f"resolver unreachable (attempt {attempt}): {e}")
+                if attempt < self.max_retries:
+                    time.sleep(self.retry_delay * attempt)
+                    continue
+                raise NetworkError(f"解析服务暂不可用: {e}")
+            except requests.RequestException as e:
+                last_network_error = e
+                logger.warning(f"resolver request exception (attempt {attempt}): {e}")
+                if attempt < self.max_retries:
+                    time.sleep(self.retry_delay * attempt)
+                    continue
+                raise NetworkError(f"解析服务请求异常: {e}")
+
+            status = response.status_code
+            logger.info(f"resolver response status: {status}")
+
+            # —— HTTP 层判定（终态优先，5xx 可重试）——
+            if status == 401:
+                raise ResolverAuthError(
+                    f"解析服务鉴权失败(401)，请检查 media_resolver.api_key: "
+                    f"{self._safe_text(response)}"
+                )
+            if status == 400:
+                raise InvalidURLError(
+                    f"无法识别的链接(400): {self._safe_text(response)}"
+                )
+            if status >= 500:
+                logger.warning(f"resolver server error {status} (attempt {attempt})")
+                if attempt < self.max_retries:
+                    time.sleep(self.retry_delay * attempt)
+                    continue
+                raise ResolverServerError(
+                    f"解析服务异常({status}): {self._safe_text(response)}"
+                )
+            if status != 200:
+                # 其余非 200（如 403/404）按响应畸形处理，记录全文
+                raise ResolverResponseError(
+                    f"解析服务返回意外状态码({status}): {self._safe_text(response)}"
+                )
+
+            # —— 200：解析 JSON ——
+            try:
+                body = response.json()
+            except ValueError as e:
+                raise ResolverResponseError(
+                    f"解析响应非合法 JSON: {e}, 内容: {self._safe_text(response)}"
+                )
+            if not isinstance(body, dict):
+                raise ResolverResponseError(
+                    f"解析响应顶层非对象: {type(body).__name__}"
+                )
+
+            if body.get("success"):
+                data = body.get("data")
+                if not isinstance(data, dict) or not data.get("video_url"):
+                    raise ResolverResponseError(
+                        f"解析成功但缺少 video_url，响应: {self._truncate(body)}"
+                    )
+                logger.info(
+                    f"resolve success: platform={data.get('platform')}, "
+                    f"video_id={data.get('video_id')}, provider={data.get('provider')}"
+                )
+                return data
+
+            # success=false：区分终态 vs 全源失败
+            self._classify_failure(body)
+
+        # 理论不可达：循环必然 return 或 raise；兜底
+        raise NetworkError(
+            f"解析服务多次失败: {last_network_error}"
+        )
+
+    def fetch_wechat_direct(self, sph_code: str) -> dict:
+        """GET /direct，返回扁平 JSON（不解码文件头；日志/异常不含 CDN 直链）。"""
+        if not isinstance(sph_code, str) or not _WECHAT_SPH_CODE_RE.fullmatch(sph_code):
+            raise InvalidURLError(f"illegal wechat sph_code: {sph_code!r}")
+
+        endpoint = f"{self.base_url}/api/stream/wechat_channels/{sph_code}/direct"
+        headers = {"X-API-Key": self.api_key, "Accept": "application/json"}
+        last_network_error: Optional[Exception] = None
+
+        for attempt in range(1, self.max_retries + 1):
+            logger.info(f"wechat direct request attempt={attempt} sph_code={sph_code}")
+            try:
+                response = requests.get(endpoint, headers=headers, timeout=self.timeout)
+            except requests.RequestException as e:
+                last_network_error = e
+                logger.warning(
+                    f"wechat direct unreachable attempt={attempt} sph_code={sph_code} err={type(e).__name__}"
+                )
+                if attempt < self.max_retries:
+                    time.sleep(self.retry_delay * attempt)
+                    continue
+                raise NetworkError(f"wechat direct service unavailable sph_code={sph_code}")
+
+            status = response.status_code
+            logger.info(f"wechat direct response status={status} sph_code={sph_code}")
+            if status == 401:
+                raise ResolverAuthError(
+                    f"wechat direct auth failed(401) sph_code={sph_code}: {self._safe_text(response)}"
+                )
+            if status == 400:
+                raise InvalidURLError(
+                    f"wechat direct illegal sph_code(400) sph_code={sph_code}: {self._safe_text(response)}"
+                )
+            if status >= 500:
+                logger.warning(f"wechat direct server error {status} attempt={attempt} sph_code={sph_code}")
+                if attempt < self.max_retries:
+                    time.sleep(self.retry_delay * attempt)
+                    continue
+                raise ResolverServerError(
+                    f"wechat direct server error({status}) sph_code={sph_code}: {self._safe_text(response)}"
+                )
+            if status != 200:
+                raise ResolverResponseError(
+                    f"wechat direct unexpected status({status}) sph_code={sph_code}: {self._safe_text(response)}"
+                )
+            try:
+                body = response.json()
+            except ValueError as e:
+                raise ResolverResponseError(
+                    f"wechat direct response is not JSON sph_code={sph_code}: {e}"
+                )
+            return self._validate_wechat_direct_body(sph_code, body)
+
+        raise NetworkError(
+            f"wechat direct failed after retries sph_code={sph_code}: "
+            f"{type(last_network_error).__name__ if last_network_error else 'unknown'}"
+        )
+
+    def _validate_wechat_direct_body(self, sph_code: str, body: dict) -> dict:
+        """校验 /direct 扁平 JSON；异常消息不含 CDN 直链。"""
+        if not isinstance(body, dict) or body.get("sph_code") != sph_code:
+            raise ResolverResponseError(f"wechat direct invalid body sph_code={sph_code}")
+        content_length = self._require_positive_int(body.get("content_length"), "content_length", sph_code)
+        encrypted_head_bytes = self._require_positive_int(
+            body.get("encrypted_head_bytes"), "encrypted_head_bytes", sph_code
+        )
+        head_b64 = body.get("head_b64")
+        if not isinstance(head_b64, str) or not head_b64:
+            raise ResolverResponseError(f"wechat direct missing head_b64 sph_code={sph_code}")
+        try:
+            head = base64.b64decode(head_b64, validate=True)
+        except ValueError as e:
+            raise ResolverResponseError(
+                f"wechat direct head_b64 is not standard base64 sph_code={sph_code}"
+            ) from e
+        if len(head) != encrypted_head_bytes:
+            raise ResolverResponseError(
+                f"wechat direct head_b64 length mismatch sph_code={sph_code} "
+                f"decoded={len(head)} encrypted_head_bytes={encrypted_head_bytes}"
+            )
+        logger.info(
+            f"wechat direct fetch ok sph_code={sph_code} "
+            f"content_length={content_length} encrypted_head_bytes={encrypted_head_bytes}"
+        )
+        return body
+
+    @staticmethod
+    def _require_positive_int(value, field: str, sph_code: str) -> int:
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ResolverResponseError(f"wechat direct invalid {field} sph_code={sph_code}")
+        return value
+
+    def _classify_failure(self, body: dict) -> None:
+        """根据 error.code / 文案把 success=false 映射为终态异常（必抛）。"""
+        error = body.get("error") or {}
+        if isinstance(error, str):
+            error = {"message": error}
+        code = (error.get("code") or "").strip().upper()
+        message = error.get("message") or "解析失败"
+
+        self._raise_space_failure(message)
+
+        if code in _NON_VIDEO_CODES:
+            raise NonVideoContentError(f"该内容无可转录视频: {message}")
+        if code in _RESOLVE_FAIL_CODES:
+            raise ResolverResolveError(f"解析失败，稍后再试: {message}")
+
+        # 无 code 或未知 code：文案关键词兜底粗分
+        lowered = message.lower()
+        if any(kw in lowered for kw in _NON_VIDEO_KEYWORDS):
+            raise NonVideoContentError(f"该内容无可转录视频: {message}")
+
+        # 默认归类为全源失败（不可重试，提示稍后再试）
+        raise ResolverResolveError(f"解析失败，稍后再试: {message}")
+
+    @staticmethod
+    def _raise_space_failure(message: str) -> None:
+        """X Space 回放终态 → 用户文案；非 Space 报错原样返回给既有分类。
+
+        直播中/未开播 → 「这场还不能回放」（终态，重试无意义）；
+        未开启回放或已过期 → 「回放不可用」。两者都不可退化成「无法识别的链接」。
+        stream 侧（下载端点 400/404）的同一套文案在
+        MediaResolverDownloader._space_stream_terminal_error，逐字一致由单测锁住。
+        """
+        lowered = message.lower()
+        if not any(marker in lowered for marker in _SPACE_ERROR_MARKERS):
+            return
+        if any(marker in lowered for marker in _SPACE_NOT_REPLAYABLE_MARKERS):
+            raise NonVideoContentError(f"X Space 这场还不能回放（直播中或尚未开始）: {message}")
+        if any(marker in lowered for marker in _SPACE_UNAVAILABLE_MARKERS):
+            raise NonVideoContentError(f"X Space 回放不可用（未开启回放或已过期）: {message}")
+
+    @staticmethod
+    def _safe_text(response, limit: int = 300) -> str:
+        try:
+            return response.text[:limit]
+        except Exception:
+            return "<no body>"
+
+    @staticmethod
+    def _truncate(obj, limit: int = 500) -> str:
+        return str(obj)[:limit]

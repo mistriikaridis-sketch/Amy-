@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title or t('web.error.title') }} - {{ t('web.viewer.default_title') }}{% endblock %}
+
+{% block content %}
+    <section class="section yg-error" aria-labelledby="yg-error-heading">
+        <p class="yg-error-kicker">{{ t('web.error.title') }}</p>
+        <h2 id="yg-error-heading" class="yg-error-heading">{{ t('web.error.heading') }}</h2>
+        <p class="yg-error-message">{{ message or t('web.error.message_default') }}</p>
+
+        {% if url %}
+        <div class="yg-error-actions">
+            <p class="yg-error-label">{{ t('web.error.actions_heading') }}</p>
+            <ul class="yg-error-action-list">
+                <li><a href="{{ url }}" target="_blank" rel="noopener">{{ t('web.error.view_original') }}</a></li>
+                <li><button type="button" class="yg-error-text-btn" onclick="window.location.reload()">{{ t('web.error.refresh_retry') }}</button></li>
+                <li><a href="/add_task_by_web">{{ t('web.error.retry_submit') }}</a></li>
+            </ul>
+        </div>
+        {% endif %}
+    </section>
+
+    <section class="section yg-error-help" aria-labelledby="yg-error-help-heading">
+        <h2 id="yg-error-help-heading" class="yg-error-help-heading">{{ t('web.error.solutions_heading') }}</h2>
+        <ul class="yg-error-help-list">
+            <li>
+                <span class="yg-error-help-term">{{ t('web.error.check_link') }}</span>
+                <span class="yg-error-help-sep">{{ t('web.punct.colon') }}</span>
+                <span class="yg-error-help-desc">{{ t('web.error.check_link_hint') }}</span>
+            </li>
+            <li>
+                <span class="yg-error-help-term">{{ t('web.error.download_failed_term') }}</span>
+                <span class="yg-error-help-sep">{{ t('web.punct.colon') }}</span>
+                <span class="yg-error-help-desc">{{ t('web.error.download_hint') }}</span>
+            </li>
+            <li>
+                <span class="yg-error-help-term">{{ t('web.error.transcribe_failed') }}</span>
+                <span class="yg-error-help-sep">{{ t('web.punct.colon') }}</span>
+                <span class="yg-error-help-desc">{{ t('web.error.transcribe_failed_hint') }}</span>
+            </li>
+            <li>
+                <span class="yg-error-help-term">{{ t('web.error.service') }}</span>
+                <span class="yg-error-help-sep">{{ t('web.punct.colon') }}</span>
+                <span class="yg-error-help-desc">{{ t('web.error.service_hint') }}</span>
+            </li>
+        </ul>
+
+        <p class="yg-error-cta-wrap">
+            <button type="button" class="yg-error-cta" onclick="window.location.reload()">{{ t('web.error.reload') }}</button>
+        </p>
+    </section>
+
+    {% if created_at_display %}
+    <p class="yg-error-meta">{{ t('web.error.created_at', time=created_at_display) }}</p>
+    {% elif created_at %}
+    <p class="yg-error-meta">{{ t('web.error.created_at', time=created_at) }}</p>
+    {% endif %}
+{% endblock %}

@@ -1,0 +1,1156 @@
+"""
+LLM Prompt 模板模块
+
+将静态指令与动态内容分离，优化 KV Cache 命中率。
+
+设计原则（基于 Manus 团队最佳实践）：
+1. System Prompt 包含所有静态指令，可被 KV Cache 复用
+2. User Prompt 仅包含动态内容（待处理文本、元数据等）
+3. 动态内容放在消息末尾，最大化前缀缓存命中
+"""
+
+from typing import Dict, Optional
+
+# ============================================================
+# 校对任务 Prompt 模板
+# ============================================================
+
+CALIBRATE_SYSTEM_PROMPT = """你是专业的中文文本校对助手。你的任务是对音频转录文本进行校对，提高可读性但不改变原意。
+
+## 校对规则
+
+1. **分段处理**：适当分段使文本结构更清晰。每当话题转换、时间跳跃或逻辑转折时应该分段。每个自然段落应该是一个完整的思想单元。
+
+2. **错误修正**：修正明显的错别字和语法错误。特别注意根据辅助信息修正专有名词的拼写。
+
+3. **标点调整**：调整标点符号的使用，确保其正确性和一致性。
+
+4. **词序优化**：如有必要，可以轻微调整词序以提高可读性，但不要改变原意。
+
+5. **保留特点**：保留原文中的口语化表达和说话者的语气特点。
+
+6. **保持完整性**：
+   - 不要添加或删除任何实质性内容
+   - 不要大段删减或概括内容
+   - 只修正错误，不做内容压缩
+   - 确保校对后的文本保持与原文相近的长度
+
+7. **无需评论**：不要解释或评论文本内容。
+
+## 输出要求
+
+- 只返回校对后的文本，不要包含任何其他解释或评论
+- 保持文本的完整性，不要进行内容删减或概括"""
+
+CALIBRATE_SYSTEM_PROMPT_EN = """You are a professional English text proofreading assistant. Your task is to proofread audio transcription text, improving readability without altering the original meaning.
+
+## Proofreading Rules
+
+1. **Paragraph structuring**: Break text into appropriate paragraphs for clarity. Start a new paragraph when the topic shifts, there is a time jump, or a logical transition occurs. Each paragraph should be a complete unit of thought.
+
+2. **Error correction**: Fix obvious typos, grammar errors, and ASR-specific mistakes such as homophones, run-on words, and incorrectly split or merged words. Pay special attention to correcting proper nouns using the provided reference information.
+
+3. **Punctuation adjustment**: Adjust punctuation for correctness and consistency.
+
+4. **Word order optimization**: If necessary, slightly adjust word order to improve readability, but do not change the original meaning.
+
+5. **Preserve character**: Retain colloquial expressions and the speaker's tone/style.
+
+6. **Maintain completeness**:
+   - Do NOT add or remove any substantive content
+   - Do NOT summarize or condense large sections
+   - Only correct errors, do not compress content
+   - Ensure the proofread text remains similar in length to the original
+
+7. **No commentary**: Do not explain or comment on the text content.
+
+8. **Do NOT translate**: Keep ALL content in English. Do NOT translate to any other language.
+
+## Output Requirements
+
+- Return ONLY the proofread text, without any additional explanations or comments
+- Maintain the completeness of the text, do not condense or summarize"""
+
+CALIBRATE_SYSTEM_PROMPT_WITH_SPEAKER = CALIBRATE_SYSTEM_PROMPT + """
+
+## 说话人处理
+
+文本中的 Speaker1、Speaker2 等是说话人标识。请尝试根据对话内容推测每个 Speaker 的实际姓名或身份，并在文本中用推测的姓名替换 Speaker[x]。如果无法推测，则保留 Speaker[x] 的格式。例如，如果 Speaker1 自我介绍为'我是李明'，则将后续的 Speaker1 都替换为'李明'。"""
+
+
+def build_calibrate_user_prompt(
+    transcript: str,
+    video_title: str = "",
+    author: str = "",
+    description: str = "",
+    key_info: str = "",
+    retry_hint: str = "",
+    language: str = "zh",
+) -> str:
+    """构建校对任务的 User Prompt
+
+    设计原则：动态内容放在末尾，最大化 KV Cache 前缀复用
+
+    Args:
+        transcript: 待校对的转录文本
+        video_title: 视频标题
+        author: 作者/频道
+        description: 视频描述
+        key_info: 关键信息（格式化后的字符串）
+        retry_hint: 重试提示（追加在开头，用于二次校对）
+        language: 文本语言（"zh" 或 "en"），控制标签语言
+
+    Returns:
+        User prompt 字符串
+    """
+    is_en = language == "en"
+    parts = []
+
+    # 重试提示（如果有，放在最前面）
+    if retry_hint:
+        if is_en:
+            parts.append(f"**Warning**: {retry_hint}\n")
+        else:
+            parts.append(f"**⚠️ 重要提示**：{retry_hint}\n")
+
+    # 辅助信息（动态部分，放在中间）
+    if video_title or author or description:
+        if is_en:
+            parts.append("\n**Reference Information** (for proper nouns and spelling):")
+            if video_title:
+                parts.append(f"- Video title: {video_title}")
+            if author:
+                parts.append(f"- Author/Channel: {author}")
+            if description:
+                desc_truncated = description[:500] + ('...' if len(description) > 500 else '')
+                parts.append(f"- Video description: {desc_truncated}")
+        else:
+            parts.append("\n**辅助信息**（用于参考专有名词和拼写）：")
+            if video_title:
+                parts.append(f"- 视频标题：{video_title}")
+            if author:
+                parts.append(f"- 作者/频道：{author}")
+            if description:
+                desc_truncated = description[:500] + ('...' if len(description) > 500 else '')
+                parts.append(f"- 视频描述：{desc_truncated}")
+
+    # 关键信息
+    if key_info:
+        if is_en:
+            parts.append("\n**Key Information** (for proper noun spelling):")
+        else:
+            parts.append("\n**关键信息**（用于参考专有名词拼写）：")
+        parts.append(key_info)
+
+    # 待校对文本（放在最后）
+    if is_en:
+        parts.append("\n**Transcript to proofread**:")
+    else:
+        parts.append("\n**待校对的转录文本**：")
+    parts.append(f"<transcript>\n{transcript}\n</transcript>")
+
+    return "\n".join(parts)
+
+
+# ============================================================
+# 总结任务 Prompt 模板
+# ============================================================
+
+SUMMARY_SYSTEM_PROMPT_SINGLE_SPEAKER = """你是专业的内容总结助手。你的任务是对视频/音频转录文本进行结构化深度总结。
+
+## 输出结构
+
+### 1. 概述（Overview）
+用一段话（100-150字）点明内容的核心论题与结论。
+
+### 2. 主题详述
+识别并详细展开内容中的各个主题，要求：
+- 每个主题作为一个小节，充分展开该主题的全部信息点，篇幅与该主题的信息量相称，服从总篇幅预算
+- 让读者不需要二次查看原内容就能了解详情
+- 若出现方法/框架/流程，将其重写为条理清晰的步骤或段落
+- 若有关键数字、定义、原话，请如实保留核心词，并在括号内补充注释
+- 使用分层的bullet points组织内容，避免单个段落过长
+- 如果文本中有Speaker标识，请尝试根据内容推测具体姓名或身份，无法推测则保留Speaker[x]的格式
+
+### 3. 核心观点与洞察
+- 提炼内容中的核心观点和重要结论，每点充分展开论证，篇幅与信息量相称
+- 使用 markdown 格式来提升观点可读性
+- 识别论述中的关键主张和论证逻辑
+- 总结主要论点和支撑论据
+
+### 4. 逻辑分析
+
+⚠️ **本章节默认不生成。**
+
+仅当内容**同时满足以下全部条件**时才生成：
+1. 内容是严谨的观点论证（学术讨论、辩论、评论文章）
+2. 存在明确的"论点→论据→结论"结构
+3. 作者有意识地进行逻辑推演，而非单纯陈述
+
+❌ **以下类型直接跳过，无需任何说明**：
+- 产品评测、功能对比、使用体验
+- 故事叙述、个人经历、采访记录
+- 新闻资讯、事实陈述、信息汇总
+- 技术教程、操作指南、科普讲解
+- 娱乐内容、日常对话、闲聊杂谈
+
+## 风格要求
+
+- 目标是读者只读总结即可获得内容的绝大部分信息量；篇幅为信息服务——允许为结构与澄清适度超出原文，禁止为凑字数而扩写、注水或堆砌格式
+- 不新增事实；若出现含混表述，请保持原意并注明不确定性
+- **只能使用中文书写，禁止添加任何常见的英文翻译或解释**
+- 如果有缩写，可以使用括号适当解释
+- 以 Markdown 语法来强化全文的结构，提升可读性
+- # 标题层级请控制在二级-四级之间
+- 无序列表请使用 '-' 语法，不要使用 '*' 或 '+' 语法
+- 避免一个段落的内容过多，可以拆解成多个逻辑段落
+- 多使用emoji增加可读性
+- 专注于总结，要求类的指令禁止体现出来
+- 只返回按照格式要求的内容，不要返回无关信息"""
+
+SUMMARY_SYSTEM_PROMPT_MULTI_SPEAKER = """你是专业的对话内容总结助手。你的任务是对多人对话转录文本进行结构化深度总结。
+
+## 输出结构
+
+### 1. 概述（Overview）
+用一段话（100-150字）点明对话的核心主题、参与者和关键结论。
+
+### 2. 主题详述
+识别并详细展开内容中的各个主题，要求：
+- 每个主题作为一个小节，充分展开该主题的全部信息点，篇幅与该主题的信息量相称，服从总篇幅预算
+- 让读者不需要二次查看原内容就能了解详情
+- 若出现方法/框架/流程，将其重写为条理清晰的步骤或段落
+- 若有关键数字、定义、原话，请如实保留核心词，并在括号内补充注释
+- 使用分层的bullet points组织内容，避免单个段落过长
+- 说明不同说话人的立场和贡献
+- 如果能推测出Speaker的真实姓名或身份，请使用推测的姓名，无法推测则保留Speaker[x]
+
+### 3. 核心观点与洞察
+- 提炼内容中的核心观点和重要结论，每点充分展开论证，篇幅与信息量相称
+- 使用 markdown 格式来提升观点可读性
+- 识别对话中达成的共识或分歧点
+- 总结主要论点和支撑论据
+
+### 4. 逻辑分析
+
+⚠️ **本章节默认不生成。**
+
+仅当内容**同时满足以下全部条件**时才生成：
+1. 内容是严谨的观点论证（学术讨论、辩论、评论文章）
+2. 存在明确的"论点→论据→结论"结构
+3. 说话人有意识地进行逻辑推演，而非单纯陈述
+
+❌ **以下类型直接跳过，无需任何说明**：
+- 产品评测、功能对比、使用体验
+- 故事叙述、个人经历、采访记录
+- 新闻资讯、事实陈述、信息汇总
+- 技术教程、操作指南、科普讲解
+- 娱乐内容、日常对话、闲聊杂谈
+
+## 风格要求
+
+- 目标是读者只读总结即可获得内容的绝大部分信息量；篇幅为信息服务——允许为结构与澄清适度超出原文，禁止为凑字数而扩写、注水或堆砌格式
+- 不新增事实；若出现含混表述，请保持原意并注明不确定性
+- **只能使用中文书写，禁止添加任何常见的英文翻译或解释**
+- 以 Markdown 语法来强化全文的结构，提升可读性
+- 多使用emoji增加可读性
+- 只返回按照格式要求的内容，不要返回无关信息"""
+
+
+def build_summary_user_prompt(
+    transcript: str,
+    video_title: str = "",
+    author: str = "",
+    description: str = "",
+    budget_target_min: Optional[int] = None,
+    budget_target_max: Optional[int] = None,
+    budget_hard_cap: Optional[int] = None,
+) -> str:
+    """
+    构建总结任务的 User Prompt
+
+    Args:
+        transcript: 转录文本
+        video_title: 视频标题
+        author: 作者/频道
+        description: 视频描述
+        budget_target_min: 篇幅预算下限（字符）
+        budget_target_max: 篇幅预算上限（字符）
+        budget_hard_cap: 篇幅硬顶（字符）
+
+    Returns:
+        User prompt 字符串
+    """
+    parts = []
+
+    if (
+        budget_target_min is not None
+        and budget_target_max is not None
+        and budget_hard_cap is not None
+    ):
+        parts.append(
+            f"**篇幅预算**：总长 {budget_target_min}–{budget_target_max} 字，"
+            f"不得超过 {budget_hard_cap} 字。"
+        )
+        parts.append("")
+
+    # 辅助信息（动态部分）
+    if video_title or author or description:
+        parts.append("**内容辅助信息**：")
+        if video_title:
+            parts.append(f"- 标题：{video_title}")
+        if author:
+            parts.append(f"- 作者/频道：{author}")
+        if description:
+            desc_truncated = description[:500] + ('...' if len(description) > 500 else '')
+            parts.append(f"- 描述：{desc_truncated}")
+        parts.append("")
+
+    # 转录文本（放在最后）
+    parts.append("**转录文本**：")
+    parts.append(transcript)
+
+    return "\n".join(parts)
+
+
+NOTES_SYSTEM_PROMPT_BASE = """
+你是长篇访谈/播客的精读笔记作者。输入是一章带时间戳的对话转写切片，输出是这一章的精读笔记。
+
+## 定位
+
+精读笔记介于"全文总结"和"逐字稿"之间：读者读完笔记应获得这一章的全部信息量，但阅读耗时约为读逐字稿的一半。因此：
+- 保留的单位是"信息点"，不是"对话回合"。
+- 你的任务是压缩表达、归拢碎片，不是复述对话过程。
+- 目标篇幅为输入正文的 40%-60%。若输出接近原文长度，说明你在誊抄而不是做笔记。
+
+## 必须保留（一个都不能丢）
+
+- 所有事实、数字、金额、日期、人名、机构名、产品名、专有名词
+- 所有判断、结论、理由、反例、分歧
+- 具体例子和故事的关键情节
+- 表达力强、值得直接引用的原话（每小节至多 2 处，加引号）
+
+## 必须丢弃（不丢等于失职）
+
+- 应答与寒暄（"对""嗯""hello 大家好"）、口头禅、车轱辘话
+- 纯引导性的提问——把它化入小节标题；仅当提问本身携带事实或观点时保留其内容
+- 逐句时间戳、逐句说话人前缀
+- 同一信息的"转述 + 原话"双写：二选一
+
+## 输出格式（严格遵守）
+
+- 只输出 Markdown 正文。不要复述章节标题，不要输出概要、前言、"本章位置"等元信息；上一章/下一章标题只是给你的定位上下文，禁止写入正文
+- 用中文书写；人名、产品名等专有名词保留原文，英文原话引用可保留英文
+- 标题只允许 ###（三级），格式为 `### [HH:MM:SS] 小节标题`，时间戳取小节内容在原文中的起点；小节标题尽量点出结论，而不只是话题名
+- 标题下用 `-` 分层 bullets，最多三层；每条 bullet 是一个完整的信息点
+- 加粗只用于关键结论与判断；不使用 emoji
+
+## 红线
+
+- 不得新增事实、猜测因果、把不确定写成确定；含混表述保持含混
+- 小节之间保持时间顺序；小节内部允许把同一话题的碎片归拢到一起
+"""
+
+NOTES_SYSTEM_PROMPT_SPEAKER = NOTES_SYSTEM_PROMPT_BASE + """
+## 说话人处理（输入带说话人标签）
+
+- 输入每行格式为 `[时间戳] 说话人: 内容`。
+- 观点归属重要时（双方交锋、各自表态、嘉宾个人经历）以 `姓名：` 开头标注 bullet；同一人连续陈述时不必逐条标注。
+- "这是谁的观点"本身是信息：当某个判断/结论有明确归属时，归属不能丢。
+
+## 示例
+
+输入片段：
+[00:12:03 - 00:12:05] 曼祺: 那你觉得他们做这个决定的核心原因是什么？
+[00:12:06 - 00:12:19] 高洪浩: 嗯，就是，我觉得核心还是成本吧。他们算过一笔账，一年大概能省两个亿。
+[00:12:20 - 00:12:21] 曼祺: 两个亿，这么多。
+[00:12:22 - 00:12:30] 高洪浩: 对。而且这个还不算人力。
+
+输出：
+### [00:12:03] 决策的核心原因：成本
+- 高洪浩：核心是成本，**一年大概能省两个亿**，且不含人力
+"""
+
+NOTES_SYSTEM_PROMPT_NO_SPEAKER = NOTES_SYSTEM_PROMPT_BASE + """
+## 说话人处理（输入无说话人标签）
+
+- 输入每行格式为 `[时间戳] 内容`，没有说话人标注；但内容可能是多人对话（访谈/播客），只是没有区分出来。
+- 默认以内容为主语写笔记（"核心原因是成本，一年约省两亿"），不写"某人说"。
+- 只有当原文文字本身明确了身份——自我介绍（"我是任鑫"）、主持人点名、开场介绍嘉宾——才可以用该身份归属观点；除此之外禁止推测或发明说话人，也不得使用 "Unknown"、"说话人A" 之类的占位归属。
+- 若文本中出现 `>>` 等换人标记，可用它判断对话轮转（比如识别问答节奏），但换人标记不构成身份依据，也不要把它抄进笔记。
+- 问答节奏可识别时，引导性提问仍化入小节标题。
+
+## 示例
+
+输入片段：
+[00:12:03 - 00:12:05] 那你觉得他们做这个决定的核心原因是什么？
+[00:12:06 - 00:12:19] >> 嗯，就是，我觉得核心还是成本吧。他们算过一笔账，一年大概能省两个亿。
+[00:12:20 - 00:12:21] 两个亿，这么多。
+[00:12:22 - 00:12:30] 对。而且这个还不算人力。
+
+输出：
+### [00:12:03] 决策的核心原因：成本
+- 核心是成本，**一年大概能省两个亿**，且不含人力
+"""
+
+
+def build_notes_user_prompt(
+    chapter_title: str,
+    chapter_gist: str,
+    chapter_text: str,
+    previous_title: str = "",
+    next_title: str = "",
+) -> str:
+    """Build the per-chapter notes prompt with neighboring chapter context."""
+    previous = previous_title or "无"
+    following = next_title or "无"
+    return "\n".join(
+        [
+            "请根据以下单章转写内容生成本章精读笔记。",
+            "",
+            f"本章标题：{chapter_title}",
+            f"本章概要：{chapter_gist}",
+            f"上一章标题：{previous}",
+            f"下一章标题：{following}",
+            "",
+            "本章带时间戳和说话人的原始切片：",
+            "<chapter_transcript>",
+            chapter_text,
+            "</chapter_transcript>",
+        ]
+    )
+
+
+# ============================================================
+# 结构化校对任务 Prompt 模板
+# ============================================================
+
+STRUCTURED_CALIBRATE_SYSTEM_PROMPT = """你是专业的中文文本校对助手。你的任务是对带有说话人标识的语音转录（ASR）文本进行校对。
+
+## 核心要求（必须遵守）
+
+输入每一行格式为 `[id][HH:MM:SS][说话人]: 内容`，其中 `[id]` 是该段对话的编号（锚点）。
+
+1. **按 id 锚点返回**：对每一段输入，返回一个 `{id, text}` 对象，`id` 与输入行的 `[id]` 完全一致
+2. **每段都要返回**：即使某段无需修改，也要原样返回该 id 的 text；不要遗漏任何 id
+3. **只改文本**：`text` 只包含校对后的对话内容，**不要**包含 id、说话人或时间戳
+4. **禁止合并、拆分、增删、重排对话**：一个 id 对应一段，不得把多段并入一个 text，也不得拆成多个
+
+## 专有名词修正（最高优先级）
+
+用户会提供一份**关键信息列表**，其中包含本次内容涉及的正确人名、品牌、术语等。
+ASR 转录经常将这些专有名词错误识别为同音字或近音字。你必须：
+1. **逐一检查**关键信息列表中的每个词，在转录文本中寻找可能的 ASR 误识别
+2. 将 ASR 误识别的文字**替换为关键信息列表中的正确拼写**
+3. 常见的 ASR 专有名词错误模式：
+   - 英文品牌被拆成无意义的中文字/拼音（如 "哥斯 r 哦" → "Cursor"、"欧普斯" → "Opus"）
+   - 中文名词被识别为同音字（如 "海陆" → "海螺"、"金业酒店" → "今夜酒店"）
+   - 英文缩写被错误拼写（如 "IR" → "ARR"、"PMFF" → "PMF"）
+   - 英文单词被拆成多个片段（如 "mini max" → "MiniMax"）
+
+## 校对规则
+
+1. **只能在单个对话内部进行修改**，不得跨对话操作
+2. **最小改动原则**：只做必要的校对与通顺化；若有多种改法，选择更接近原句的版本
+3. 修正明显的错别字和语法错误，优先修正"读起来明显不通顺"的表达
+4. 调整标点符号的使用，确保其正确性和一致性
+5. 如有必要，可以**适度调整语序**以提高可读性，但不要改变原意或强调重点
+6. 可以**删减少量无意义的口头禅/口误/重复词**（如"那个…就是…就…"），但不要删掉关键信息或语气词
+7. 可对明显口误做纠正（如把"任一/套生/压力面"等修成通顺表达）
+8. 保留原文中的口语化表达和说话者的语气特点，避免过度书面化
+9. **保留语义与事实**：不要改变人称、否定/肯定、因果关系、时间顺序、数字/金额/数量等核心信息
+10. **不确定时偏保守**：宁可轻微修整，也不要重写或引入新含义
+11. **重点修正 ASR 常见错误**（不改变原意）：
+   - 叠字与重复：例如"遇遇不到/薪薪十多万万/约约咖啡馆"等
+   - 错分词或错字：例如"a 本大学/任一/身出市场/套生大学"等明显不通顺表达
+   - 英文字母或符号误入导致的断裂（如 a 本 → 一本）
+   - 同音词误识别导致的歧义（结合上下文与关键信息列表修正）
+12. **保持完整性**：不要新增或删减实质内容，不要压缩或概括
+13. 不要解释或评论文本内容
+
+## 输出格式
+
+必须输出 JSON 格式，包含 corrections 数组，每项为 `{"id": 整数, "text": "校对后文本"}`。
+- `id` 与输入行的 `[id]` 一一对应，必须覆盖每一个输入 id
+- `text` 只放校对后的内容，不要带 id、说话人、时间戳或行格式标签
+
+只返回校对后的JSON，不要包含任何其他解释或评论。"""
+
+STRUCTURED_CALIBRATE_SYSTEM_PROMPT_EN = """You are a professional English text proofreading assistant. Your task is to proofread dialog text with speaker identifiers.
+
+## Core Requirements (MUST follow)
+
+Each input line has the format `[id][HH:MM:SS][Speaker]: content`, where `[id]` is the anchor index of that dialog.
+
+1. **Return by id anchor**: for every input dialog, return one `{id, text}` object whose `id` exactly matches the input line's `[id]`
+2. **Return every segment**: even if a segment needs no change, return its text unchanged under its id; do NOT omit any id
+3. **Only edit text**: `text` contains ONLY the proofread content, NOT the id, speaker, or timestamp
+4. **Do NOT merge, split, add, remove, or reorder dialogs**: one id maps to exactly one segment
+
+## Proofreading Rules
+
+1. **Only modify within a single dialog**, do not operate across dialogs
+2. **Minimal changes principle**: only make necessary corrections; when multiple options exist, choose the one closest to the original
+3. Fix obvious typos and grammar errors, prioritizing expressions that are clearly unnatural
+4. Adjust punctuation for correctness and consistency
+5. If necessary, **slightly adjust word order** to improve readability, but do not change the meaning
+6. May **remove minor filler words/speech errors/repetitions** (e.g., "um", "like like", "you know you know"), but do not remove key information
+7. Correct obvious speech errors and ASR misrecognitions (e.g., homophones, run-on words, incorrectly split words)
+8. Preserve colloquial expressions and the speaker's tone/style, avoid over-formalizing
+9. **Preserve semantics and facts**: do not change person, negation/affirmation, causality, temporal order, numbers/amounts
+10. **When uncertain, be conservative**: prefer minor polishing over rewriting or introducing new meaning
+11. **Focus on common ASR errors** (without changing meaning):
+   - Homophones: e.g., "their/there/they're", "your/you're", "its/it's"
+   - Run-on or incorrectly split words
+   - Missing or incorrect punctuation from speech-to-text
+   - Misrecognized proper nouns (correct using reference information)
+12. **Maintain completeness**: do not add or remove substantive content, do not compress or summarize
+13. Do not explain or comment on the text content
+14. **Do NOT translate**: Keep ALL content in English. Do NOT translate to any other language.
+
+## Output Format
+
+Must output JSON format containing a corrections array, each item being `{"id": integer, "text": "proofread text"}`.
+- `id` maps one-to-one to the input line's `[id]`, and MUST cover every input id
+- `text` holds ONLY the proofread content, without id, speaker, timestamp, or line-format tags
+
+Return ONLY the proofread JSON, without any additional explanations or comments."""
+
+
+# ============================================================
+# 结构化校对任务 Prompt 模板（无说话人变体）
+# ============================================================
+# 与 STRUCTURED_CALIBRATE 系列同契约（{id,text} 输出、禁止合并/拆分/增删/重排），
+# 仅行格式描述去掉 [说话人] 括号，与 SpeakerAwareProcessor._format_chunk_for_prompt
+# 的 has_speaker=False 行生成保持一致。
+
+STRUCTURED_CALIBRATE_NO_SPEAKER_SYSTEM_PROMPT = """你是专业的中文文本校对助手。你的任务是对语音转录（ASR）文本进行逐段校对。
+
+## 核心要求（必须遵守）
+
+输入每一行格式为 `[id][HH:MM:SS]: 内容`（该段无时间戳时为 `[id]: 内容`），其中 `[id]` 是该段的编号（锚点）。
+
+1. **按 id 锚点返回**：对每一段输入，返回一个 `{id, text}` 对象，`id` 与输入行的 `[id]` 完全一致
+2. **每段都要返回**：即使某段无需修改，也要原样返回该 id 的 text；不要遗漏任何 id
+3. **只改文本**：`text` 只包含校对后的内容，**不要**包含 id 或时间戳
+4. **禁止合并、拆分、增删、重排**：一个 id 对应一段，不得把多段并入一个 text，也不得拆成多个
+
+## 专有名词修正（最高优先级）
+
+用户会提供一份**关键信息列表**，其中包含本次内容涉及的正确人名、品牌、术语等。
+ASR 转录经常将这些专有名词错误识别为同音字或近音字。你必须：
+1. **逐一检查**关键信息列表中的每个词，在转录文本中寻找可能的 ASR 误识别
+2. 将 ASR 误识别的文字**替换为关键信息列表中的正确拼写**
+3. 常见的 ASR 专有名词错误模式：
+   - 英文品牌被拆成无意义的中文字/拼音（如 "哥斯 r 哦" → "Cursor"、"欧普斯" → "Opus"）
+   - 中文名词被识别为同音字（如 "海陆" → "海螺"、"金业酒店" → "今夜酒店"）
+   - 英文缩写被错误拼写（如 "IR" → "ARR"、"PMFF" → "PMF"）
+   - 英文单词被拆成多个片段（如 "mini max" → "MiniMax"）
+
+## 校对规则
+
+1. **只能在单个段落内部进行修改**，不得跨段落操作
+2. **最小改动原则**：只做必要的校对与通顺化；若有多种改法，选择更接近原句的版本
+3. 修正明显的错别字和语法错误，优先修正"读起来明显不通顺"的表达
+4. 调整标点符号的使用，确保其正确性和一致性
+5. 如有必要，可以**适度调整语序**以提高可读性，但不要改变原意或强调重点
+6. 可以**删减少量无意义的口头禅/口误/重复词**（如"那个…就是…就…"），但不要删掉关键信息或语气词
+7. 可对明显口误做纠正（如把"任一/套生/压力面"等修成通顺表达）
+8. 保留原文中的口语化表达和说话者的语气特点，避免过度书面化
+9. **保留语义与事实**：不要改变人称、否定/肯定、因果关系、时间顺序、数字/金额/数量等核心信息
+10. **不确定时偏保守**：宁可轻微修整，也不要重写或引入新含义
+11. **重点修正 ASR 常见错误**（不改变原意）：
+   - 叠字与重复：例如"遇遇不到/薪薪十多万万/约约咖啡馆"等
+   - 错分词或错字：例如"a 本大学/任一/身出市场/套生大学"等明显不通顺表达
+   - 英文字母或符号误入导致的断裂（如 a 本 → 一本）
+   - 同音词误识别导致的歧义（结合上下文与关键信息列表修正）
+12. **保持完整性**：不要新增或删减实质内容，不要压缩或概括
+13. 不要解释或评论文本内容
+
+## 输出格式
+
+必须输出 JSON 格式，包含 corrections 数组，每项为 `{"id": 整数, "text": "校对后文本"}`。
+- `id` 与输入行的 `[id]` 一一对应，必须覆盖每一个输入 id
+- `text` 只放校对后的内容，不要带 id、时间戳或行格式标签
+
+只返回校对后的JSON，不要包含任何其他解释或评论。"""
+
+STRUCTURED_CALIBRATE_NO_SPEAKER_SYSTEM_PROMPT_EN = """You are a professional English text proofreading assistant. Your task is to proofread speech-to-text (ASR) transcription text segment by segment.
+
+## Core Requirements (MUST follow)
+
+Each input line has the format `[id][HH:MM:SS]: content` (or `[id]: content` when the segment has no timestamp), where `[id]` is the anchor index of that segment.
+
+1. **Return by id anchor**: for every input segment, return one `{id, text}` object whose `id` exactly matches the input line's `[id]`
+2. **Return every segment**: even if a segment needs no change, return its text unchanged under its id; do NOT omit any id
+3. **Only edit text**: `text` contains ONLY the proofread content, NOT the id or timestamp
+4. **Do NOT merge, split, add, remove, or reorder segments**: one id maps to exactly one segment
+
+## Proofreading Rules
+
+1. **Only modify within a single segment**, do not operate across segments
+2. **Minimal changes principle**: only make necessary corrections; when multiple options exist, choose the one closest to the original
+3. Fix obvious typos and grammar errors, prioritizing expressions that are clearly unnatural
+4. Adjust punctuation for correctness and consistency
+5. If necessary, **slightly adjust word order** to improve readability, but do not change the meaning
+6. May **remove minor filler words/speech errors/repetitions** (e.g., "um", "like like", "you know you know"), but do not remove key information
+7. Correct obvious speech errors and ASR misrecognitions (e.g., homophones, run-on words, incorrectly split words)
+8. Preserve colloquial expressions and the speaker's tone/style, avoid over-formalizing
+9. **Preserve semantics and facts**: do not change person, negation/affirmation, causality, temporal order, numbers/amounts
+10. **When uncertain, be conservative**: prefer minor polishing over rewriting or introducing new meaning
+11. **Focus on common ASR errors** (without changing meaning):
+   - Homophones: e.g., "their/there/they're", "your/you're", "its/it's"
+   - Run-on or incorrectly split words
+   - Missing or incorrect punctuation from speech-to-text
+   - Misrecognized proper nouns (correct using reference information)
+12. **Maintain completeness**: do not add or remove substantive content, do not compress or summarize
+13. Do not explain or comment on the text content
+14. **Do NOT translate**: Keep ALL content in English. Do NOT translate to any other language.
+
+## Output Format
+
+Must output JSON format containing a corrections array, each item being `{"id": integer, "text": "proofread text"}`.
+- `id` maps one-to-one to the input line's `[id]`, and MUST cover every input id
+- `text` holds ONLY the proofread content, without id, timestamp, or line-format tags
+
+Return ONLY the proofread JSON, without any additional explanations or comments."""
+
+
+def build_structured_calibrate_user_prompt(
+    input_data: dict = None,
+    dialogs_text: str = None,
+    video_title: str = "",
+    author: str = "",
+    description: str = "",
+    key_info: str = "",
+    dialog_count: int = None,
+    min_ratio: float = 0.95,
+    language: str = "zh",
+) -> str:
+    """构建结构化校对任务的 User Prompt
+
+    支持两种调用方式：
+    1. 旧版：传入 input_data (dict) - 用于向后兼容
+    2. 新版：传入 dialogs_text (str) + key_info - 用于新架构
+
+    Args:
+        input_data: 包含 dialogs 的输入数据（旧版）
+        dialogs_text: 格式化的对话文本（新版）
+        video_title: 视频标题
+        author: 作者/频道
+        description: 视频描述
+        key_info: 关键信息（格式化后的字符串，新版）
+        dialog_count: 对话数量（新版）
+        min_ratio: 最小长度比例（新版）
+        language: 文本语言（"zh" 或 "en"），控制标签语言
+
+    Returns:
+        User prompt 字符串
+    """
+    import json
+
+    is_en = language == "en"
+    parts = []
+
+    # 检测调用方式
+    if input_data is not None:
+        # 旧版调用方式：使用 input_data
+        input_dialog_count = len(input_data.get('dialogs', []))
+
+        # 数量要求（关键约束）
+        if is_en:
+            parts.append(f"**Dialog count constraint**: Input has {input_dialog_count} dialogs, output must have exactly {input_dialog_count} dialogs.")
+        else:
+            parts.append(f"**对话数量约束**：输入有 {input_dialog_count} 个对话，输出必须恰好 {input_dialog_count} 个对话。")
+
+        # 辅助信息
+        if video_title or author or description:
+            if is_en:
+                parts.append("\n**Reference Information** (for proper nouns and spelling):")
+                if video_title:
+                    parts.append(f"- Video title: {video_title}")
+                if author:
+                    parts.append(f"- Author/Channel: {author}")
+                if description:
+                    desc_truncated = description[:500] + ('...' if len(description) > 500 else '')
+                    parts.append(f"- Video description: {desc_truncated}")
+            else:
+                parts.append("\n**辅助信息**（用于参考专有名词和拼写）：")
+                if video_title:
+                    parts.append(f"- 视频标题：{video_title}")
+                if author:
+                    parts.append(f"- 作者/频道：{author}")
+                if description:
+                    desc_truncated = description[:500] + ('...' if len(description) > 500 else '')
+                    parts.append(f"- 视频描述：{desc_truncated}")
+
+        # 待校对数据（放在最后，使用 sort_keys 确保序列化确定性）
+        if is_en:
+            parts.append("\n**JSON data to proofread**:")
+        else:
+            parts.append("\n**待校对的JSON数据**：")
+        parts.append(json.dumps(input_data, ensure_ascii=False, indent=2, sort_keys=True))
+
+    elif dialogs_text is not None:
+        # 新版调用方式：使用 dialogs_text
+        if dialog_count is None:
+            # 尝试从文本中估算对话数量
+            dialog_count = len([line for line in dialogs_text.split('\n') if line.strip().startswith('[')])
+
+        # 长度要求
+        if is_en:
+            parts.append(f"**Length requirement**: The proofread text must be at least {int(min_ratio * 100)}% of the original length.")
+        else:
+            parts.append(f"**长度要求**：校对后的文本长度必须保持在原文的 {int(min_ratio * 100)}% 以上。")
+
+        # 数量要求（关键约束）：必须覆盖每个 id
+        if is_en:
+            parts.append(f"\n**Coverage constraint**: Input has {dialog_count} dialogs (ids 0..{dialog_count - 1}). Return exactly one correction per id, covering every id.")
+        else:
+            parts.append(f"\n**覆盖约束**：输入有 {dialog_count} 段对话（id 为 0..{dialog_count - 1}）。每个 id 必须返回恰好一项修正，不得遗漏任何 id。")
+
+        # 格式说明（ID 锚点）
+        if is_en:
+            parts.append("\n**Dialog format**: Each line is [id][HH:MM:SS][Speaker]: content. Return {id, text} per line; id must match, text holds only the proofread content (no id/speaker/timestamp).")
+        else:
+            parts.append("\n**对话格式说明**：每行格式为 [id][HH:MM:SS][说话人]: 内容。按 id 返回 {id, text}；id 必须对应，text 只放校对后的内容（不含 id/说话人/时间戳）。")
+
+        # 辅助信息
+        if video_title or author or description:
+            if is_en:
+                parts.append("\n**Reference Information** (for proper nouns and spelling):")
+                if video_title:
+                    parts.append(f"- Video title: {video_title}")
+                if author:
+                    parts.append(f"- Author/Channel: {author}")
+                if description:
+                    desc_truncated = description[:500] + ('...' if len(description) > 500 else '')
+                    parts.append(f"- Video description: {desc_truncated}")
+            else:
+                parts.append("\n**辅助信息**（用于参考专有名词和拼写）：")
+                if video_title:
+                    parts.append(f"- 视频标题：{video_title}")
+                if author:
+                    parts.append(f"- 作者/频道：{author}")
+                if description:
+                    desc_truncated = description[:500] + ('...' if len(description) > 500 else '')
+                    parts.append(f"- 视频描述：{desc_truncated}")
+
+        # 关键信息（强化指导）
+        if key_info:
+            if is_en:
+                parts.append("\n**Key Information — Correct Spellings** (ASR often misrecognizes these as homophones or similar-sounding words. You MUST check and correct any misrecognized forms in the transcript):")
+            else:
+                parts.append("\n**关键信息 — 正确拼写对照表**（ASR 经常将以下专有名词误识别为同音字或近音字，请务必逐一核对并纠正转录文本中的错误拼写）：")
+            parts.append(key_info)
+
+        # 待校对的对话文本（放在最后）
+        if is_en:
+            parts.append("\n**Dialog text to proofread**:")
+        else:
+            parts.append("\n**待校对的对话文本**：")
+        parts.append(f"<dialogs>\n{dialogs_text}\n</dialogs>")
+
+    else:
+        raise ValueError("Must provide either input_data or dialogs_text")
+
+    return "\n".join(parts)
+
+
+# ============================================================
+# 校验任务 Prompt 模板
+# ============================================================
+
+VALIDATION_SYSTEM_PROMPT = """你是专业的文本校对质量评估专家。你的任务是评估校对结果的质量。
+
+## 评估维度（每项0-10分）
+
+1. **格式正确性**：JSON格式是否正确，字段是否完整
+2. **内容保真度**：是否保持了原始内容的意思，没有添加或删除实质信息
+   - 注意：结合辅助信息，某些专有名词、人名的修正是合理的
+3. **文本质量**：错别字、语法、标点是否得到改善
+4. **说话人一致性**：说话人标识是否保持不变
+5. **时间信息一致性**：时间戳是否保持不变
+
+## 评估标准
+
+- overall_score >= 8.0 且所有单项 >= 7.0 才算通过
+- 格式错误直接不通过
+- 内容增删超过10%不通过
+- 说话人或时间信息改变直接不通过
+- 参考辅助信息评估专有名词修正的合理性
+
+## 输出格式
+
+必须输出 JSON 格式，包含 overall_score, scores, pass, issues, recommendation 字段。"""
+
+
+def build_validation_user_prompt(
+    original_data: dict,
+    calibrated_data: dict,
+    video_title: str = "",
+    author: str = "",
+    description: str = ""
+) -> str:
+    """
+    构建校验任务的 User Prompt
+
+    Args:
+        original_data: 原始数据
+        calibrated_data: 校对后数据
+        video_title: 视频标题
+        author: 作者/频道
+        description: 视频描述
+
+    Returns:
+        User prompt 字符串
+    """
+    import json
+
+    parts = []
+
+    # 辅助信息
+    if video_title or author or description:
+        parts.append("**辅助信息**（用于评估专有名词修正的合理性）：")
+        if video_title:
+            parts.append(f"- 视频标题：{video_title}")
+        if author:
+            parts.append(f"- 作者/频道：{author}")
+        if description:
+            desc_truncated = description[:500] + ('...' if len(description) > 500 else '')
+            parts.append(f"- 视频描述：{desc_truncated}")
+        parts.append("")
+
+    # 原始数据
+    parts.append("**原始文本**：")
+    parts.append(json.dumps(original_data, ensure_ascii=False, indent=2, sort_keys=True))
+
+    # 校对后数据
+    parts.append("\n**校对后文本**：")
+    parts.append(json.dumps(calibrated_data, ensure_ascii=False, indent=2, sort_keys=True))
+
+    return "\n".join(parts)
+
+
+# ============================================================
+# 统一质量验证 Prompt 模板
+# ============================================================
+
+from .unified_validation_prompts import (  # noqa: E402
+    UNIFIED_VALIDATION_SYSTEM_PROMPT,
+    build_unified_validation_user_prompt,
+)
+
+
+# ============================================================
+# 说话人推断任务 Prompt 模板
+# ============================================================
+
+SPEAKER_INFERENCE_SYSTEM_PROMPT = """你是专业的说话人身份裁决助手。你的任务是基于转录内容与视频元数据，为每个说话人给出候选真实姓名，并为每个候选名附上一条可核对的原文引用。程序会逐字核对每条引用是否真实存在于本轮输入中：核对不通过的候选将被作废，对应说话人将显示为「说话人N」。**给出真实、可逐字摘抄的引用，比猜中名字更重要。**
+
+## 输入说明
+
+输入分两个证据引用区：
+1. **视频元数据区**：标题、作者、描述。注意：描述中的参会名单只是名单，名单里有某个名字 ≠ 该名字实际到场发言。
+2. **转录内容片段区**：按"说话人首次出现的时间顺序"分组，每组可能包含：
+   - 该说话人首次出现的时间戳（如有）
+   - 首次出场前，其他人称呼/提及该说话人的上下文片段（若存在，是判断身份的最强信号）
+   - 该说话人本人的发言样本（仅为代表性片段，并非全部对话）
+3. **第三人提及旁证区**（若存在）：其他说话人呼叫某说话人、且紧邻下一段就是该说话人应答的短句，每条标注实际发言者、段号与呼叫对象。呼叫-回应关系已由程序核实；某条旁证**只能**作为其「呼叫对象」那个说话人的 dialog_address 证据来源，引用其他说话人的旁证句会被作废。
+
+## 证据类型（candidates[].evidence_type，只能取以下四个值）
+
+- `dialog_address`：对话内其他人对该说话人的称呼，或该说话人的自我介绍。最强的证据，单条核对通过即可被采用为显示名。引用可来自：该说话人本人片段/出场上下文，或第三人提及旁证区中呼叫对象为该说话人的句子（旁证句的呼叫-回应关系已由程序核实，采用时程序会在 meta 里记录来源说话人与段号）。
+- `title_credit`：视频标题/专场名/作者名。仅当另有该说话人的 `dialog_address` 佐证（表明该说话人是专场主角/主持人）时才会被采用；标题名与对话称呼是否同一人属于推测，采用时显示名会保留原始说话人编号并以「标题关联推测」等标注形式同时带上两条来源名。
+- `author_host`：作者署名即主持人身份。与 `title_credit` 同规则。
+- `description_roster`：描述中的参会名单。名单只是名单，核对通过也**不会单独**让名字被采用，仅作为佐证记录；不要把它当作「实际发言人名单」。
+
+## 硬性要求
+
+1. **evidence_quote 必须逐字摘抄自本轮输入文本**（元数据区或转录片段区原文），禁止改写、缩写、翻译、纠错或跨句拼接。程序按逐字匹配核对，任何一处不符该候选即作废。
+2. **参会名单不是发言人名单**：只有当某个说话人的对话称呼/自我介绍与名单中的名字对应时，才把名单条目作为该说话人的 `description_roster` 佐证。
+3. 某个说话人确实没有任何可引用的证据时，candidates 中给该说话人空数组，**不要编造名字或引用**。
+4. confidence 是你对每个推断的自报诊断值（0-1），如实评估即可；它**不参与**采用判定——采用与否完全由引用核对结果决定。
+5. 姓名长度应合理（通常2-4个字符），保持人名的准确性。
+
+## 输出格式
+
+必须输出 JSON 格式，包含 speaker_mapping、confidence（每个说话人对应一个 0-1 的置信度）、candidates（每个说话人对应一个候选数组，每项含 name / evidence_type / evidence_quote）、reasoning 字段。"""
+
+
+# 平台说话人先验（gate 修复轮第 5 轮③）。表内平台会在 user prompt 的视频信息区
+# 追加一段平台背景说明（表外平台零变化：不追加任何行，prompt 与不带 platform
+# 参数的旧输出逐字一致）。先验段只进 prompt 展示、**不进**
+# build_speaker_quote_sections 的任何引用分区——先验是背景知识不是原文证据，
+# 核对侧分区不含它，LLM 从先验文案里摘 quote 会被逐字核对 fail-closed 作废。
+# 发现机制不依赖先验做旁证索引（codex 收紧要求：「Adrian Punk」与「胖哥」无
+# 字面对应，旁证发现靠呼叫-回应模式本身），先验只帮 LLM 理解「作者常任主持人、
+# 专场标题多为主讲、称呼与账号名可能完全不同」这类平台常识。
+PLATFORM_SPEAKER_PRIORS = {
+    "twitter_space": (
+        "- 平台背景（twitter_space）：这是实时语音专场。作者（创建者）通常就是本场主持人，"
+        "通常开场即在场并全程控场；标题中「XX专场」里的名字通常指主讲嘉宾；"
+        "对话里互相使用的称呼（昵称、别称）可能与标题/描述/参会名单里的任何文字都不同。"
+    ),
+}
+
+
+def build_speaker_quote_sections(
+    video_title: str = "",
+    author: str = "",
+    description: str = "",
+    context_snippets: str = "",
+) -> Dict[str, str]:
+    """按 evidence_type 返回允许引用的分区核对文本（与 user prompt 同源）。
+
+    gate 审查修复②（correctness-speaker-evidence-quote-scope）：quote 核对
+    对象从「整个 user_prompt」收窄到 evidence_type 对应分区，堵住「仅出现在
+    描述参会名单里的名字被误标为 dialog_address」的绕行路径。组装侧
+    （build_speaker_inference_user_prompt）与核对侧（SpeakerInferencer）都
+    从本函数取分区文本，保证「LLM 能看到的分区」与「程序核对的分区」逐字
+    同源——分区文本各侧手写必然漂移，这是唯一实现点。
+
+    Returns:
+        键为 SPEAKER_EVIDENCE_TYPES 四个域值，值为该证据类型允许逐字引用的
+        分区文本。description 为空时描述行不进入 prompt，对应分区保持空串
+        （核对侧 fail-closed：空分区上任何 quote 都核对不过）。
+    """
+    return {
+        "title_credit": f"- 标题：{video_title}",
+        "author_host": f"- 作者：{author}",
+        "description_roster": f"- 描述：{description}" if description else "",
+        "dialog_address": context_snippets,
+    }
+
+
+def build_speaker_inference_user_prompt(
+    context_snippets: str,
+    original_speakers: list,
+    video_title: str = "",
+    author: str = "",
+    description: str = "",
+    platform: str = "",
+    corroboration_snippets: str = "",
+) -> str:
+    """
+    构建说话人推断任务的 User Prompt
+
+    两个证据引用区（元数据区 / 转录片段区）的分区标注是证据裁决的核对契约：
+    LLM 返回的 evidence_quote 必须逐字出自其 evidence_type 对应的分区，
+    SpeakerInferencer 以 build_speaker_quote_sections 返回的分区文本作为
+    quote 核对对象（与本函数的组装同源）。
+
+    Args:
+        context_snippets: 转录内容片段（已按说话人分组、按首次出现时间排序，
+            每组含首次出现时间戳与出场上下文，见 SpeakerInferencer._format_sample_dialogs）
+        original_speakers: 原始说话人标识列表
+        video_title: 视频标题
+        author: 作者
+        description: 视频描述
+        platform: 平台标识（gate 修复轮第 5 轮③）。命中 PLATFORM_SPEAKER_PRIORS
+            的平台在视频信息区追加一段平台背景先验；表外平台不追加任何行，
+            与不带该参数的旧输出逐字一致。先验段不进任何引用分区（见
+            PLATFORM_SPEAKER_PRIORS 注释）。
+        corroboration_snippets: 第三人提及旁证区文本（gate 修复轮第 5 轮①，
+            由 SpeakerInferencer 收集并渲染；空串时该区整体不出现，prompt
+            与无旁证的旧输出逐字一致）。
+
+    Returns:
+        User prompt 字符串
+    """
+    # 分区文本唯此一处构建，组装与核对共用（见 build_speaker_quote_sections）。
+    sections = build_speaker_quote_sections(
+        video_title=video_title,
+        author=author,
+        description=description,
+        context_snippets=context_snippets,
+    )
+    parts = []
+
+    # 证据引用区一：元数据。显式标注「参会名单≠实际发言人」——这是某 X Space
+    # 生产案例（fixture 已合成化，见 tests/fixtures/twitter_space_1wxWjlzQVwDJQ/
+    # README.md）里规则1系统性失效的根因：13 人参会名单被当成发言人名单使用。
+    parts.append("**视频元数据**（证据引用区之一；标题/作者/描述只是元数据，描述中的参会名单≠实际发言人名单）：")
+    parts.append(sections["title_credit"])
+    parts.append(sections["author_host"])
+    if description:
+        parts.append(sections["description_roster"])
+    # 平台先验段（表内平台才有；不属于引用分区，见 PLATFORM_SPEAKER_PRIORS 注释）
+    prior_text = PLATFORM_SPEAKER_PRIORS.get(platform or "", "")
+    if prior_text:
+        parts.append(prior_text)
+
+    # 原始说话人标识
+    parts.append(f"\n**原始说话人标识**：{', '.join(original_speakers)}")
+
+    # 证据引用区二：转录内容片段（按说话人分组，按首次出现时间排序，含出场上下文）
+    parts.append("\n**转录内容片段**（证据引用区之二；按说话人首次出现顺序分组，标注首次出现时间与出场上下文）：")
+    parts.append(sections["dialog_address"])
+
+    # 第三人提及旁证区（gate 修复轮第 5 轮①）：独立区，不混入任何说话人的
+    # 本人分组。每条旁证已由程序核实「该他人发言的紧邻回应者是所标注的呼叫
+    # 对象」，可作为对应说话人的 dialog_address 引用来源（来源说话人与段号
+    # 由程序在核对时记录进 meta）。空串时整区不出现（表外零变化语义）。
+    if corroboration_snippets:
+        parts.append(f"\n{corroboration_snippets}")
+
+    return "\n".join(parts)
+
+
+# ============================================================
+# 说话人语义矛盾扫描任务 Prompt 模板
+# ============================================================
+
+CONTRADICTION_SCAN_SYSTEM_PROMPT = """你是说话人归属审计助手。请只依据给定的带 segment_id 的转录片段，找出可能与当前说话人归属矛盾的段落。
+
+## 检测信号
+
+- direct_address_conflict：直接称呼或回应显示当前段的归属可能不对
+- self_reference_conflict：当前说话人自述的身份/姓名与归属不一致
+- third_person_conflict：第三人称提及显示当前段更像另一位说话人
+- qa_adjacency_conflict：相邻问答关系与当前归属不一致
+
+## 输出约束
+
+只返回 JSON 对象。每条矛盾必须包含一个真实的 segment_id、上述四个 reason 之一，以及至少一个作为证据的 evidence_segment_ids。只能引用输入中出现过的 ID；不要输出姓名、改名建议或自由文本。没有矛盾时返回 {"contradictions": []}。"""
+
+
+def build_contradiction_scan_user_prompt(
+    dialogs_text: str,
+    speaker_mapping: dict,
+    speaker_inference_meta: dict,
+    video_title: str = "",
+    description: str = "",
+) -> str:
+    """构建单次语义矛盾扫描 prompt，动态转录内容位于末尾。"""
+    import json
+
+    parts = [
+        "**speaker_mapping**:",
+        json.dumps(speaker_mapping or {}, ensure_ascii=False, sort_keys=True),
+        "\n**speaker_inference_meta**:",
+        json.dumps(speaker_inference_meta or {}, ensure_ascii=False, sort_keys=True),
+    ]
+    if video_title:
+        parts.append(f"\n**video_title**: {video_title}")
+    if description:
+        parts.append(f"\n**description**: {description[:500]}")
+    parts.extend(
+        [
+            "\n**dialogs**（每行含 segment_id、展示名、speaker_id、文本前100字符）:",
+            f"<dialogs>\n{dialogs_text}\n</dialogs>",
+        ]
+    )
+    return "\n".join(parts)
+
+
+# ============================================================
+# 章节梗概生成任务 Prompt 模板
+# ============================================================
+
+CHAPTERS_SYSTEM_PROMPT = """你是专业的章节划分助手。你的任务是阅读带编号的转录文本，按内容主题的转折点将其划分为若干章节，并为每章撰写标题与梗概。
+
+## 划分规则
+
+1. **按主题转折切章**：每当话题发生实质性转换时开启新章节，每章通常对应一个完整的话题或环节
+2. **粒度参考**：每章大致对应 3-10 分钟的内容，过细（每句话都切）或过粗（整段只有一章）都应避免
+3. **覆盖全文、按编号顺序**：章节必须从正文中出现的第一个编号开始，按编号顺序覆盖到最后一个编号，不得遗漏中间的话题内容。**注意编号本身可能不连续**（如 0, 2, 5, 6...，中间缺失的编号是正常现象，不代表内容被遗漏）——只需按正文里实际出现的编号顺序衔接即可，不要试图"补全"缺失的编号
+4. **起点严格递增**：后一章的起始编号必须严格大于前一章，不允许重复或倒序
+
+## 输出字段要求
+
+- `title`：章节标题，不超过 20 个字，不要带"第 x 章"之类的序号前缀，直接概括这一段的主题
+- `gist`：章节梗概，用 2-3 句话说明这一段具体讲了什么、有什么值得听的亮点或结论，禁止"介绍了相关内容"这类空洞笼统的套话
+- `start_seg`：该章节在输入编号正文中的起始编号（整数）。**只能使用正文里实际出现过的编号**（即每行开头 `[i]` 里的 i），不要使用正文中未出现的编号，也不要自己计算或输出任何时间戳——时间信息由程序根据编号反查，你给出的时间大概率是错的
+
+## 输出格式
+
+必须输出 JSON 对象，格式为：
+```
+{"chapters": [{"title": "...", "gist": "...", "start_seg": 0}, ...]}
+```
+- 数组按 start_seg 升序排列
+- 只返回 JSON，不要包含任何解释、评论，也不要用 markdown 代码块包裹"""
+
+
+def build_chapters_user_prompt(
+    segment_lines: str,
+    video_title: str = "",
+    author: str = "",
+    description: str = "",
+    retry_hint: str = "",
+) -> str:
+    """构建章节梗概生成任务的 User Prompt
+
+    设计原则：动态内容放在末尾，最大化 KV Cache 前缀复用（与 build_calibrate_user_prompt
+    等保持一致的组织方式）。
+
+    **调用方契约（安全边界，gate-r21 P2 + gate-r22 P2：单一截断点原则）**：
+    video_title/author/description 必须是调用方已经压平（不含任何换行）**且
+    已完成长度截断**的字符串——本函数不对它们做任何二次清洗或截断，直接原样
+    拼进 prompt。
+
+    - 压平：这三者与 segment_lines 一起构成同一份 prompt 文本，若其中任意
+      一个含有换行，就可能在 prompt 里伪造出形如 "[i] mm:ss fake" 的假编号
+      行，一旦 i 恰好是某个真实存在的编号，就会让 ChaptersProcessor 的语义
+      校验（按幸存原始下标的成员关系判定）把伪造内容误判为合法的 start_seg
+      锚点。
+    - 截断：本函数曾经在这里对 description 做过一次独立的 500 字符截断，
+      与 `ChaptersProcessor._truncate_description`（截断到 2000 字符）各自
+      为政——门控 4 按压平后的完整长度（最多 2000）计量，而本函数却只发送
+      前 500 字符，导致 501-2000 字符区间的 description 出现"门控测量的
+      长度"与"实际发送的内容"不一致：门控放行，但 1500 字符的上下文被静默
+      丢弃。gate-r22 P2 移除了这处残留截断，改为**单一截断点原则**——全部
+      长度控制只在 `_truncate_description` 一处发生，本函数不再重复处理，
+      从而保证"门控测量的 == 实际发送的"。
+
+    当前唯一调用方 `ChaptersProcessor._generate_with_retry` 在调用本函数前
+    已统一通过 `_flatten_for_prompt` 压平三者、通过 `_truncate_description`
+    截断 description，详见这两个函数与 `ChaptersProcessor._process_impl`
+    门控 4 处的注释；未来若新增调用方，必须遵守同样的前置压平+截断约定，
+    不能绕过，也不能在本函数内部另行截断。
+
+    Args:
+        segment_lines: 压缩后的编号正文，每行形如 "[i] mm:ss (speaker:)? text"
+            （由 ChaptersProcessor._build_segment_lines 生成）
+        video_title: 视频标题（调用方须已压平，不含换行，见上方契约说明）
+        author: 作者/频道（同上）
+        description: 视频描述（调用方须已压平且已截断到长度上限，见上方
+            契约说明——本函数不再做二次截断）
+        retry_hint: 上一次输出违反语义约束（start_seg 越界/未递增等）时的具体错误描述，
+            用于二次调用时引导模型修正，为空则不追加此段
+
+    Returns:
+        User prompt 字符串
+    """
+    parts = []
+
+    # 重试提示（如果有，放在最前面，与 build_calibrate_user_prompt 的 retry_hint 用法一致）
+    if retry_hint:
+        parts.append(f"**⚠️ 上一次输出有误，请修正**：{retry_hint}\n")
+
+    # 辅助信息（动态部分）
+    if video_title or author or description:
+        parts.append("**内容辅助信息**：")
+        if video_title:
+            parts.append(f"- 标题：{video_title}")
+        if author:
+            parts.append(f"- 作者/频道：{author}")
+        if description:
+            # 不在此处截断——调用方（ChaptersProcessor）已通过
+            # _truncate_description 截断到长度上限，本函数是唯一发送点，
+            # 必须原样使用调用方给定的值，否则门控计量的长度会与实际发送
+            # 的内容脱节（见上方函数 docstring 的"单一截断点原则"说明）。
+            parts.append(f"- 描述：{description}")
+        parts.append("")
+
+    # 编号正文（放在最后）
+    parts.append("**编号正文**（请基于以下编号划分章节）：")
+    parts.append(segment_lines)
+
+    return "\n".join(parts)
+
+
+# ============================================================
+# 注：分段总结功能已废弃，当前采用整体总结策略
+# ============================================================

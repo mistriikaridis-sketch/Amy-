@@ -1,0 +1,47 @@
+# Hosted CI for the public 阅稿 fork — no zlxlabs gate, self-hosted runners,
+# deploy/n305, Silo, or Feishu webhooks.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+
+      - name: Seed example config for tests
+        run: |
+          test -f config/config.jsonc || cp config/config.example.jsonc config/config.jsonc
+          test -f config/users.json || cp config/users.example.json config/users.json
+
+      - name: Import smoke
+        run: uv run python -c "from video_transcript_api.api import app as _app; print('import-ok')"
+
+      - name: Compileall (no secrets)
+        run: uv run python -m compileall -q src main.py
+
+      - name: Config preflight
+        run: uv run python main.py --check-config --config config/config.jsonc
+
+      - name: Unit subset (no secrets / no network ASR)
+        run: uv run pytest -q tests/unit/i18n tests/unit/utils --maxfail=8

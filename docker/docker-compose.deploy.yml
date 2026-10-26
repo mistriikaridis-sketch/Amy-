@@ -1,0 +1,31 @@
+# 部署种子：同步到部署目录根（n305:/opt/media/VideoTranscriptAPI）作为 docker-compose.yml。
+# 2026-10-15 从 docker-package skill v4 的 digest-env 形态迁移为 ci-templates D3 的本地
+# tag 形态：pull_and_deploy.sh 从 ACR 拉取 ${ACR_IMAGE}:${GIT_SHA} 后在本机 retag 成
+# IMAGE_NAME:latest，compose 起容器与镜像对账都认这个本地名——故此处必须写本地名
+# （ACR 私有仓，不写 registry 前缀），不能用 registry digest env 占位。
+# .env 必须与 docker-compose.yml 同目录（部署目录根）。
+services:
+  video-transcript-api:
+    image: video-transcript-api:latest
+    container_name: video-transcript-api
+    environment:
+      - TZ=Asia/Shanghai
+    # .env 是部署域环境源，位于 data/config 卷外；恢复数据库不得覆盖此处的关闭开关。
+    # 缺失 VTA_UPLOADS_ENABLED 或值不是精确小写 true 时保持关闭。
+    env_file:
+      - .env
+    ports:
+      - "8200:8000"
+    # 必须大于内部关闭预算 20s，否则 SIGKILL 可能打断优雅关闭流程。
+    stop_grace_period: 30s
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./.deploy-state:/app/.deploy-state
+    mem_limit: 2g
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

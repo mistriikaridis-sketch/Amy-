@@ -1,0 +1,401 @@
+"""
+Unit tests for YoutubeDownloader._fetch_youtube_transcript_result() (the
+youtube-transcript-api path) with timestamps.
+
+This is the first of the three YouTube subtitle parsing paths described in
+the task. It used to only keep item.text, discarding item.start/item.duration
+entirely. These tests lock down:
+
+- Text output stays byte-identical to the historical algorithm (join by
+  space, each item.text.strip()).
+- segments carries start_time/end_time (seconds, start + duration) / text.
+- Timestamp extraction failures (missing/non-numeric .start or .duration on
+  a snippet) never break text, and never drop that snippet from segments
+  either ("text is never lost" invariant): only the offending snippet's
+  start_time/end_time is nulled out; the rest of the batch is untouched.
+- Existing control-flow sentinels (IP_BLOCKED / TRANSCRIPTS_DISABLED / None)
+  are preserved as plain string / None, only the success path now returns a
+  SubtitleResult.
+- _fetch_youtube_transcript() (existing internal entry, still mocked as a
+  plain string by other test files) keeps returning plain text on success.
+
+All console output must be in English only (no emoji, no Chinese).
+"""
+
+from unittest.mock import Mock
+
+from youtube_transcript_api._errors import IpBlocked, TranscriptsDisabled
+
+from video_transcript_api.downloaders.subtitle_types import SubtitleResult
+from video_transcript_api.downloaders.youtube import YoutubeDownloader
+
+
+class FakeSnippet:
+    """Stand-in for youtube_transcript_api.FetchedTranscriptSnippet."""
+
+    def __init__(self, text, start, duration):
+        self.text = text
+        self.start = start
+        self.duration = duration
+
+
+class FakeSnippetMissingDuration:
+    """Snippet missing the .duration attribute entirely (malformed data)."""
+
+    def __init__(self, text, start):
+        self.text = text
+        self.start = start
+
+
+class FakeTranscriptListing:
+    def __init__(self, language_code, is_generated=False):
+        self.language_code = language_code
+        self.is_generated = is_generated
+
+
+def _make_downloader() -> YoutubeDownloader:
+    return YoutubeDownloader()
+
+
+def test_transcript_result_has_segments_with_start_end_time():
+    downloader = _make_downloader()
+    downloader.ytt_api = Mock()
+    downloader.ytt_api.list = Mock(return_value=[FakeTranscriptListing("zh-CN")])
+    downloader.ytt_api.fetch = Mock(return_value=[
+        FakeSnippet("Hello", 0.0, 1.5),
+        FakeSnippet("world", 1.5, 2.0),
+    ])
+
+    result = downloader._fetch_youtube_transcript_result("video123")
+
+    assert isinstance(result, SubtitleResult)
+    assert result.text == "Hello world"
+    assert result.segments == [
+        {"start_time": 0.0, "end_time": 1.5, "text": "Hello"},
+        {"start_time": 1.5, "end_time": 3.5, "text": "world"},
+    ]
+    downloader.ytt_api.fetch.assert_called_once_with("video123", languages=["zh-CN"])
+
+
+def test_backward_compatible_entry_still_returns_plain_text():
+    """_fetch_youtube_transcript() (existing internal entry, mocked elsewhere
+    in the suite as a plain string) keeps returning str on success."""
+    downloader = _make_downloader()
+    downloader.ytt_api = Mock()
+    downloader.ytt_api.list = Mock(return_value=[FakeTranscriptListing("en")])
+    downloader.ytt_api.fetch = Mock(return_value=[
+        FakeSnippet("  padded  ", 0.0, 1.0),
+        FakeSnippet("text", 1.0, 1.0),
+    ])
+
+    text = downloader._fetch_youtube_transcript("video123")
+
+    assert text == "padded text"
+    assert isinstance(text, str)
+
+
+def test_missing_duration_attribute_keeps_snippet_with_none_end_time():
+    """A snippet missing .duration must still land in segments (text is
+    never lost) -- only its end_time is nulled out, since end_time depends
+    on both start and duration."""
+    downloader = _make_downloader()
+    downloader.ytt_api = Mock()
+    downloader.ytt_api.list = Mock(return_value=[FakeTranscriptListing("en")])
+    downloader.ytt_api.fetch = Mock(return_value=[
+        FakeSnippetMissingDuration("Hello world", 0.0),
+    ])
+
+    result = downloader._fetch_youtube_transcript_result("video123")
+
+    assert result.text == "Hello world"
+    assert result.segments == [
+        {"start_time": 0.0, "end_time": None, "text": "Hello world"},
+    ]
+
+
+def test_mixed_valid_and_broken_snippets_keep_all_text_in_segments():
+    """Mixed batch: a normal snippet, one missing .duration, and another
+    normal one. All three must appear in segments -- the broken one with
+    end_time = None -- and text stays byte-identical to the legacy join."""
+    downloader = _make_downloader()
+    downloader.ytt_api = Mock()
+    downloader.ytt_api.list = Mock(return_value=[FakeTranscriptListing("en")])
+    downloader.ytt_api.fetch = Mock(return_value=[
+        FakeSnippet("Hello", 0.0, 1.5),
+        FakeSnippetMissingDuration("Broken timing", 1.5),
+        FakeSnippet("world", 3.5, 1.0),
+    ])
+
+    result = downloader._fetch_youtube_transcript_result("video123")
+
+    assert result.text == "Hello Broken timing world"
+    assert result.segments == [
+        {"start_time": 0.0, "end_time": 1.5, "text": "Hello"},
+        {"start_time": 1.5, "end_time": None, "text": "Broken timing"},
+        {"start_time": 3.5, "end_time": 4.5, "text": "world"},
+    ]
+
+
+def test_ip_blocked_sentinel_preserved():
+    downloader = _make_downloader()
+    downloader.ytt_api = Mock()
+    downloader.ytt_api.list = Mock(side_effect=IpBlocked("video123"))
+
+    result = downloader._fetch_youtube_transcript_result("video123")
+
+    assert result == "IP_BLOCKED"
+
+
+def test_transcripts_disabled_sentinel_preserved():
+    downloader = _make_downloader()
+    downloader.ytt_api = Mock()
+    downloader.ytt_api.list = Mock(side_effect=TranscriptsDisabled("video123"))
+
+    result = downloader._fetch_youtube_transcript_result("video123")
+
+    assert result == "TRANSCRIPTS_DISABLED"
+
+
+def test_no_available_languages_returns_none():
+    downloader = _make_downloader()
+    downloader.ytt_api = Mock()
+    downloader.ytt_api.list = Mock(return_value=[])
+
+    result = downloader._fetch_youtube_transcript_result("video123")
+
+    assert result is None
+
+
+def test_empty_transcript_falls_back_to_none():
+    """When the only available language yields no text at all, the method
+    keeps returning None (matching the historical empty-subtitle behavior)."""
+    downloader = _make_downloader()
+    downloader.ytt_api = Mock()
+    downloader.ytt_api.list = Mock(return_value=[FakeTranscriptListing("fr")])
+    downloader.ytt_api.fetch = Mock(return_value=[])
+
+    result = downloader._fetch_youtube_transcript_result("video123")
+
+    assert result is None
+
+
+def test_astronomically_large_start_overflows_to_none_start_time():
+    """A JSON-legal but astronomically large integer time value (e.g. 10**400,
+    which can survive upstream deserialization as a legit Python int) makes
+    float() raise OverflowError instead of returning inf or raising
+    ValueError/TypeError. Before the fix this propagated out of the per-item
+    try/except, was caught by the outer broad `except Exception` in
+    _fetch_youtube_transcript_result, and silently lost the ENTIRE subtitle
+    path (not just the one bad timestamp) -- every priority + fallback
+    language attempt failed, returning None. After the fix, this degrades to
+    start_time=None for just the offending snippet -- consistent with any
+    other unparseable time -- and the rest of the batch (including its own
+    text) is untouched."""
+    downloader = _make_downloader()
+    downloader.ytt_api = Mock()
+    downloader.ytt_api.list = Mock(return_value=[FakeTranscriptListing("en")])
+    downloader.ytt_api.fetch = Mock(return_value=[
+        FakeSnippet("Hello", 10 ** 400, 1.5),
+        FakeSnippet("world", 1.5, 2.0),
+    ])
+
+    result = downloader._fetch_youtube_transcript_result("video123")
+
+    assert isinstance(result, SubtitleResult)
+    assert result.text == "Hello world"
+    assert result.segments == [
+        {"start_time": None, "end_time": None, "text": "Hello"},
+        {"start_time": 1.5, "end_time": 3.5, "text": "world"},
+    ]
+
+
+def test_astronomically_large_duration_overflows_to_none_end_time():
+    """Same OverflowError risk applies to item.duration (used to compute
+    end_time = start + duration): an astronomically large duration must not
+    blow up the whole language attempt either. Only this snippet's end_time
+    is nulled out; start_time and text stay intact."""
+    downloader = _make_downloader()
+    downloader.ytt_api = Mock()
+    downloader.ytt_api.list = Mock(return_value=[FakeTranscriptListing("en")])
+    downloader.ytt_api.fetch = Mock(return_value=[
+        FakeSnippet("Hello", 0.0, 10 ** 400),
+    ])
+
+    result = downloader._fetch_youtube_transcript_result("video123")
+
+    assert isinstance(result, SubtitleResult)
+    assert result.text == "Hello"
+    assert result.segments == [
+        {"start_time": 0.0, "end_time": None, "text": "Hello"},
+    ]
+
+
+def test_start_plus_duration_sum_overflow_yields_none_end_time():
+    """start and duration are each individually finite (1e308 is a legal
+    float, well within range), so float(item.start) / float(item.duration)
+    both succeed and pass math.isfinite() on their own. But float addition
+    does NOT raise OverflowError the way int->float conversion does -- it
+    silently saturates to inf (1e308 + 1e308 == inf). Before the fix,
+    end_time = start_time + duration was never re-checked after the sum, so
+    this produced an end_time of inf, violating the "time field is None or
+    finite non-negative" invariant. After the fix, the sum itself is
+    validated with math.isfinite(): start_time is kept (it was valid on its
+    own), end_time is nulled out, and the text and the rest of the batch are
+    untouched."""
+    downloader = _make_downloader()
+    downloader.ytt_api = Mock()
+    downloader.ytt_api.list = Mock(return_value=[FakeTranscriptListing("en")])
+    downloader.ytt_api.fetch = Mock(return_value=[
+        FakeSnippet("Overflowing", 1e308, 1e308),
+        FakeSnippet("world", 1.5, 2.0),
+    ])
+
+    result = downloader._fetch_youtube_transcript_result("video123")
+
+    assert isinstance(result, SubtitleResult)
+    assert result.text == "Overflowing world"
+    assert result.segments == [
+        {"start_time": 1e308, "end_time": None, "text": "Overflowing"},
+        {"start_time": 1.5, "end_time": 3.5, "text": "world"},
+    ]
+
+
+def test_negative_start_becomes_none_text_and_other_snippets_unaffected():
+    """A negative item.start (e.g. upstream library returning garbage data)
+    has no physical meaning -- start_time must be nulled, but the snippet's
+    text must still be preserved in segments, and the rest of the batch must
+    be untouched."""
+    downloader = _make_downloader()
+    downloader.ytt_api = Mock()
+    downloader.ytt_api.list = Mock(return_value=[FakeTranscriptListing("en")])
+    downloader.ytt_api.fetch = Mock(return_value=[
+        FakeSnippet("Negative start", -5.0, 2.0),
+        FakeSnippet("world", 1.5, 2.0),
+    ])
+
+    result = downloader._fetch_youtube_transcript_result("video123")
+
+    assert result.text == "Negative start world"
+    assert result.segments == [
+        {"start_time": None, "end_time": None, "text": "Negative start"},
+        {"start_time": 1.5, "end_time": 3.5, "text": "world"},
+    ]
+
+
+def test_negative_duration_yields_none_end_time():
+    """A negative duration large enough to push end_time itself negative
+    must null end_time (start_time, which is valid on its own, is kept)."""
+    downloader = _make_downloader()
+    downloader.ytt_api = Mock()
+    downloader.ytt_api.list = Mock(return_value=[FakeTranscriptListing("en")])
+    downloader.ytt_api.fetch = Mock(return_value=[
+        FakeSnippet("Negative duration", 5.0, -10.0),
+    ])
+
+    result = downloader._fetch_youtube_transcript_result("video123")
+
+    assert result.text == "Negative duration"
+    assert result.segments == [
+        {"start_time": 5.0, "end_time": None, "text": "Negative duration"},
+    ]
+
+
+def test_negative_start_with_positive_duration_does_not_leak_end_time():
+    """Regression for a real leak in the derivation order: start=-5 (invalid,
+    must be nulled) with duration=10 naively computes end = -5 + 10 = 5 -- a
+    *positive* number that slips past sanitize_time_pair's "end negative"
+    rule (unlike the -5.0/duration=2.0 case in
+    test_negative_start_becomes_none_text_and_other_snippets_unaffected,
+    where end stays negative and gets caught anyway). Before the fix, end
+    was derived from start BEFORE start's own negativity was cleaned, so a
+    meaningless end=5 (derived from an already-invalid start) leaked through
+    as (None, 5.0). After the fix, start is cleaned first; end is only ever
+    derived from an already-validated start, so an invalid start yields
+    (None, None). A normal snippet in the same batch confirms the fix
+    doesn't touch valid entries."""
+    downloader = _make_downloader()
+    downloader.ytt_api = Mock()
+    downloader.ytt_api.list = Mock(return_value=[FakeTranscriptListing("en")])
+    downloader.ytt_api.fetch = Mock(return_value=[
+        FakeSnippet("Negative start leak", -5.0, 10.0),
+        FakeSnippet("world", 1.5, 2.0),
+    ])
+
+    result = downloader._fetch_youtube_transcript_result("video123")
+
+    assert result.text == "Negative start leak world"
+    assert result.segments == [
+        {"start_time": None, "end_time": None, "text": "Negative start leak"},
+        {"start_time": 1.5, "end_time": 3.5, "text": "world"},
+    ]
+
+
+def test_bool_start_is_rejected_as_invalid_time():
+    """gate-r21 P3: item.start being a bool (e.g. True/False, however that
+    might slip through from a malformed/mocked upstream response) must NOT
+    be silently accepted by float() -- bool is a subclass of int, so
+    float(True) == 1.0 and float(False) == 0.0 both "succeed" and look like
+    legitimate small timestamps. The shared time-parsing adapter
+    (transcriber.segments.parse_time_to_seconds) already explicitly rejects
+    bool for this exact reason; this per-item conversion must apply the same
+    isinstance(value, bool) guard for consistency. start_time must be nulled
+    out for the offending snippet, but its text must still be preserved in
+    segments (per-item fault tolerance), and end_time -- which depends on a
+    valid start_time -- must also stay None even though duration itself is
+    legitimate."""
+    downloader = _make_downloader()
+    downloader.ytt_api = Mock()
+    downloader.ytt_api.list = Mock(return_value=[FakeTranscriptListing("en")])
+    downloader.ytt_api.fetch = Mock(return_value=[
+        FakeSnippet("Bool start", True, 1.5),
+        FakeSnippet("world", 1.5, 2.0),
+    ])
+
+    result = downloader._fetch_youtube_transcript_result("video123")
+
+    assert isinstance(result, SubtitleResult)
+    assert result.text == "Bool start world"
+    assert result.segments == [
+        {"start_time": None, "end_time": None, "text": "Bool start"},
+        {"start_time": 1.5, "end_time": 3.5, "text": "world"},
+    ]
+
+
+def test_bool_duration_is_rejected_as_invalid_time():
+    """Same bool-rejection rule applies symmetrically to item.duration: a
+    legitimate start_time paired with a bool duration must not compute a
+    bogus 1-second (or 0-second) end_time via float(True)/float(False).
+    start_time and text are unaffected; only end_time is nulled out."""
+    downloader = _make_downloader()
+    downloader.ytt_api = Mock()
+    downloader.ytt_api.list = Mock(return_value=[FakeTranscriptListing("en")])
+    downloader.ytt_api.fetch = Mock(return_value=[
+        FakeSnippet("Bool duration", 5.0, True),
+    ])
+
+    result = downloader._fetch_youtube_transcript_result("video123")
+
+    assert isinstance(result, SubtitleResult)
+    assert result.text == "Bool duration"
+    assert result.segments == [
+        {"start_time": 5.0, "end_time": None, "text": "Bool duration"},
+    ]
+
+
+def test_reversed_interval_end_before_start_yields_none_end_time():
+    """A small negative duration whose sum with start is still non-negative
+    (end >= 0) but ends up before start (end < start, an inverted interval)
+    must null end_time -- start_time is kept, text is unaffected."""
+    downloader = _make_downloader()
+    downloader.ytt_api = Mock()
+    downloader.ytt_api.list = Mock(return_value=[FakeTranscriptListing("en")])
+    downloader.ytt_api.fetch = Mock(return_value=[
+        FakeSnippet("Reversed interval", 5.0, -2.0),
+    ])
+
+    result = downloader._fetch_youtube_transcript_result("video123")
+
+    assert result.text == "Reversed interval"
+    assert result.segments == [
+        {"start_time": 5.0, "end_time": None, "text": "Reversed interval"},
+    ]

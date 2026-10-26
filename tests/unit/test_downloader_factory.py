@@ -1,0 +1,227 @@
+"""
+Downloader factory unit tests.
+
+Covers:
+- create_downloader returns correct downloader type for each platform URL
+- Unknown URLs fall back to GenericDownloader
+- Various URL formats (with/without www, https/http, path params)
+
+All console output must be in English only (no emoji, no Chinese).
+"""
+
+import pytest
+
+from video_transcript_api.downloaders import factory
+from video_transcript_api.downloaders.factory import create_downloader
+from video_transcript_api.downloaders.youtube import YoutubeDownloader
+from video_transcript_api.downloaders.bilibili import BilibiliDownloader
+from video_transcript_api.downloaders.douyin import DouyinDownloader
+from video_transcript_api.downloaders.xiaohongshu import XiaohongshuDownloader
+from video_transcript_api.downloaders.xiaoyuzhou import XiaoyuzhouDownloader
+from video_transcript_api.downloaders.apple_podcast import ApplePodcastDownloader
+from video_transcript_api.downloaders.generic import GenericDownloader
+from video_transcript_api.downloaders.media_resolver import MediaResolverDownloader
+
+
+# ---------------------------------------------------------------------------
+# YouTube
+# ---------------------------------------------------------------------------
+
+class TestYoutubeRouting:
+    """Factory should return YoutubeDownloader for YouTube URLs."""
+
+    @pytest.mark.parametrize("url", [
+        "https://www.youtube.com/watch?v=abc123",
+        "http://www.youtube.com/watch?v=abc123",
+        "https://youtube.com/watch?v=abc123",
+        "https://www.youtube.com/shorts/abc123",
+        "https://youtu.be/abc123",
+        "http://youtu.be/abc123",
+        "https://www.youtube.com/watch?v=abc123&list=PLxyz",
+        "https://youtube.com/embed/abc123",
+    ])
+    def test_youtube_urls(self, url):
+        downloader = create_downloader(url)
+        assert isinstance(downloader, YoutubeDownloader), (
+            f"Expected YoutubeDownloader for {url}, got {type(downloader).__name__}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Bilibili
+# ---------------------------------------------------------------------------
+
+class TestBilibiliRouting:
+    """Factory should return BilibiliDownloader for Bilibili URLs."""
+
+    @pytest.mark.parametrize("url", [
+        "https://www.bilibili.com/video/BV1xx411c7XW",
+        "http://www.bilibili.com/video/BV1xx411c7XW",
+        "https://bilibili.com/video/BV1xx411c7XW",
+        "https://www.bilibili.com/video/av12345",
+        "https://b23.tv/abc123",
+        "http://b23.tv/abc123",
+    ])
+    def test_bilibili_urls(self, url):
+        downloader = create_downloader(url)
+        assert isinstance(downloader, BilibiliDownloader), (
+            f"Expected BilibiliDownloader for {url}, got {type(downloader).__name__}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Douyin
+# ---------------------------------------------------------------------------
+
+class TestDouyinRouting:
+    """Factory should return DouyinDownloader for Douyin URLs."""
+
+    @pytest.mark.parametrize("url", [
+        "https://www.douyin.com/video/1234567890",
+        "http://www.douyin.com/video/1234567890",
+        "https://douyin.com/video/1234567890",
+        "https://v.douyin.com/abc123/",
+        "http://v.douyin.com/abc123/",
+    ])
+    def test_douyin_urls(self, url):
+        downloader = create_downloader(url)
+        assert isinstance(downloader, DouyinDownloader), (
+            f"Expected DouyinDownloader for {url}, got {type(downloader).__name__}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Xiaohongshu
+# ---------------------------------------------------------------------------
+
+class TestXiaohongshuRouting:
+    """Factory should return XiaohongshuDownloader for Xiaohongshu URLs."""
+
+    @pytest.mark.parametrize("url", [
+        "https://www.xiaohongshu.com/explore/abc123",
+        "http://www.xiaohongshu.com/explore/abc123",
+        "https://xiaohongshu.com/explore/abc123",
+        "https://xhslink.com/abc123",
+        "http://xhslink.com/abc123",
+        "https://xhslink.cn/o/abc123",
+    ])
+    def test_xiaohongshu_urls(self, url):
+        downloader = create_downloader(url)
+        assert isinstance(downloader, XiaohongshuDownloader), (
+            f"Expected XiaohongshuDownloader for {url}, got {type(downloader).__name__}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Xiaoyuzhou
+# ---------------------------------------------------------------------------
+
+class TestXiaoyuzhouRouting:
+    """Factory should return XiaoyuzhouDownloader for Xiaoyuzhou URLs."""
+
+    @pytest.mark.parametrize("url", [
+        "https://www.xiaoyuzhoufm.com/episode/abc123",
+        "http://www.xiaoyuzhoufm.com/episode/abc123",
+        "https://xiaoyuzhoufm.com/episode/abc123",
+        "https://www.xiaoyuzhoufm.com/podcast/abc123",
+    ])
+    def test_xiaoyuzhou_urls(self, url):
+        downloader = create_downloader(url)
+        assert isinstance(downloader, XiaoyuzhouDownloader), (
+            f"Expected XiaoyuzhouDownloader for {url}, got {type(downloader).__name__}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Apple Podcast
+# ---------------------------------------------------------------------------
+
+class TestApplePodcastRouting:
+    """Factory should return ApplePodcastDownloader for Apple Podcast URLs."""
+
+    @pytest.mark.parametrize("url", [
+        "https://podcasts.apple.com/us/podcast/lex-fridman-podcast/id1434243584?i=1000774912806",
+        "https://podcasts.apple.com/cn/podcast/some-show/id123456?i=987654",
+        "http://podcasts.apple.com/us/podcast/some-show/id123456",
+    ])
+    def test_apple_podcast_urls(self, url):
+        downloader = create_downloader(url)
+        assert isinstance(downloader, ApplePodcastDownloader), (
+            f"Expected ApplePodcastDownloader for {url}, got {type(downloader).__name__}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Unknown / Generic fallback
+# ---------------------------------------------------------------------------
+
+class TestMediaResolverRouting:
+    """Factory flag routing (#2-A): both on/off paths must be regression-tested."""
+
+    @pytest.fixture
+    def resolver_on(self, monkeypatch):
+        monkeypatch.setattr(factory, "_use_media_resolver", lambda: True)
+
+    @pytest.fixture
+    def resolver_off(self, monkeypatch):
+        monkeypatch.setattr(factory, "_use_media_resolver", lambda: False)
+
+    @pytest.mark.parametrize("url", [
+        "https://www.douyin.com/video/7123",
+        "https://v.douyin.com/abc/",
+        "https://www.xiaohongshu.com/explore/abc",
+        "https://xhslink.com/abc",
+        "https://xhslink.cn/o/abc",
+        "https://weixin.qq.com/sph/AOzokRxWHz",
+        "https://x.com/someuser/status/1234567890",
+        "https://twitter.com/someuser/status/1234567890?s=20",
+        "https://x.com/i/spaces/1AKEmvYqbrOKL",
+        "https://x.com/i/spaces/1AKEmvYqbrOKL/peek?s=20",
+    ])
+    def test_flag_on_routes_to_resolver(self, resolver_on, url):
+        downloader = create_downloader(url)
+        assert isinstance(downloader, MediaResolverDownloader), (
+            f"flag on: expected MediaResolverDownloader for {url}, got {type(downloader).__name__}"
+        )
+
+    @pytest.mark.parametrize("url,expected", [
+        ("https://www.douyin.com/video/7123", DouyinDownloader),
+        ("https://www.xiaohongshu.com/explore/abc", XiaohongshuDownloader),
+        ("https://weixin.qq.com/sph/AOzokRxWHz", GenericDownloader),
+        ("https://x.com/someuser/status/1234567890", GenericDownloader),
+        ("https://twitter.com/someuser/status/1234567890?s=20", GenericDownloader),
+    ])
+    def test_flag_off_routes_to_legacy(self, resolver_off, url, expected):
+        downloader = create_downloader(url)
+        assert isinstance(downloader, expected), (
+            f"flag off: expected {expected.__name__} for {url}, got {type(downloader).__name__}"
+        )
+
+    @pytest.mark.parametrize("url,expected", [
+        ("https://www.bilibili.com/video/BV1xx411c7XW", BilibiliDownloader),
+        ("https://www.youtube.com/watch?v=abc123", YoutubeDownloader),
+        ("https://www.xiaoyuzhoufm.com/episode/abc123", XiaoyuzhouDownloader),
+        ("https://podcasts.apple.com/us/podcast/show/id123456?i=987654", ApplePodcastDownloader),
+    ])
+    def test_flag_on_other_platforms_unaffected(self, resolver_on, url, expected):
+        downloader = create_downloader(url)
+        assert isinstance(downloader, expected), (
+            f"flag on: expected {expected.__name__} for {url}, got {type(downloader).__name__}"
+        )
+
+
+class TestGenericFallback:
+    """Unknown URLs should fall back to GenericDownloader."""
+
+    @pytest.mark.parametrize("url", [
+        "https://www.example.com/video/123",
+        "https://vimeo.com/12345",
+        "https://www.dailymotion.com/video/x7zzzzz",
+        "https://unknown-site.org/watch?id=999",
+        "http://some-random-site.net/media/clip.mp4",
+    ])
+    def test_unknown_urls(self, url):
+        downloader = create_downloader(url)
+        assert isinstance(downloader, GenericDownloader), (
+            f"Expected GenericDownloader for {url}, got {type(downloader).__name__}"
+        )

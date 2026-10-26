@@ -1,0 +1,52 @@
+{
+  "name": "阅稿",
+  "short_name": "阅稿",
+  "description": "粘贴链接或上传文件，三步得到可读文稿",
+  "id": "/add_task_by_web",
+  "start_url": "/add_task_by_web",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#fafaf7",
+  "background_color": "#fafaf7",
+  "icons": [
+    {
+      "src": "/static/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "开始转写",
+      "short_name": "开始",
+      "url": "/add_task_by_web",
+      "icons": [{ "src": "/static/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "任务历史",
+      "short_name": "历史",
+      "url": "/static/history.html",
+      "icons": [{ "src": "/static/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
+  "share_target": {
+    "action": "/add_task_by_web",
+    "method": "GET",
+    "params": {
+      "url": "url",
+      "title": "title",
+      "text": "text"
+    }
+  }
+}

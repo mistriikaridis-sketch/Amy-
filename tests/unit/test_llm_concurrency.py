@@ -1,0 +1,248 @@
+"""
+LLM task concurrency test.
+
+Verifies that multiple LLM tasks can run concurrently via the thread pool,
+not serialized by the queue processor.
+
+All console output must be in English only (no emoji, no Chinese).
+"""
+
+import datetime
+import threading
+from contextlib import contextmanager
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+
+from video_transcript_api.api.services import llm_ops as llm_ops_module
+
+
+class _DummyQueue:
+    def __init__(self):
+        self.completed = 0
+
+    def task_done(self):
+        self.completed += 1
+
+
+class _DummyCacheManager:
+    def __init__(self):
+        self.saved = []
+        self._outbox = {}
+        self.tasks = {}
+
+    @contextmanager
+    def media_lock(self, platform, media_id):
+        """No-op stand-in mirroring CacheManager.media_lock's public contract.
+
+        _save_llm_results wraps its layered-cache check/write/merge section
+        in this per-media lock; a no-op keeps these tests exercising true
+        cross-task concurrency (the real lock only serializes tasks sharing
+        the same media, and each task here uses a distinct media_id anyway).
+        """
+        yield
+
+    def invalidate_llm_status(self, platform, media_id, use_speaker_recognition):
+        """No-op stand-in for the write-ahead status-file revocation
+        (S1, PR3 review hardening): _save_llm_results calls this before
+        rewriting any product file so a mid-rewrite failure can't leave a
+        stale llm_status.json vouching for a torn result. This fake never
+        persisted a status file in the first place, so there is nothing to
+        return/delete -- an empty dict matches the real implementation's
+        "no prior status" case.
+
+        use_speaker_recognition (V1, PR3 review hardening): accepted (and
+        required, mirroring the real signature) purely so this fake stays
+        call-compatible with _save_llm_results -- the real parameter exists
+        to target the correct cache variant's directory, which this no-op
+        fake has no notion of.
+        """
+        return {}
+
+    def save_llm_result(self, *, platform, media_id, use_speaker_recognition, llm_type, content):
+        self.saved.append(
+            {
+                "platform": platform,
+                "media_id": media_id,
+                "llm_type": llm_type,
+                "content": content,
+            }
+        )
+        return True
+
+    def get_task_by_id(self, task_id):
+        return self.tasks.setdefault(
+            task_id, {"task_id": task_id, "view_token": f"token-{task_id}"},
+        )
+
+    def update_task_llm_config(self, task_id, models_used):
+        pass
+
+    def save_llm_status(self, *, platform, media_id, use_speaker_recognition,
+                         calibration_status=None, calibration_stats=None,
+                         summary_status=None, chapters_status=None):
+        """No-op stand-in for the honest-status-model llm_status.json writer.
+
+        Intentionally does NOT append to self.saved (that list is asserted
+        against as "2 tasks x 2 results each" -- calibrated + summary text).
+        chapters_status accepted for call-compatibility with T6 wiring.
+        """
+        return True
+
+    def get_cache(self, platform=None, media_id=None, url=None,
+                  use_speaker_recognition=None):
+        """No-op cache lookup for chapters timeline gradient / status merge."""
+        return None
+
+    def update_task_status(self, task_id, status, **kwargs):
+        self.get_task_by_id(task_id).update(kwargs)
+        # Real CacheManager.update_task_status is a compare-and-set that
+        # returns True on a genuine win (see H2 fix, local codex review
+        # round 7: _handle_llm_task now gates its completion notification
+        # on this return value). This double has no terminal-stickiness
+        # model of its own, so it always reports a win.
+        if status in ("success", "failed"):
+            self._outbox.setdefault(task_id, {
+                "task_id": task_id, "status": status,
+                "error_message": kwargs.get("error_message"),
+                "completed_at": "dummy-completed",
+                "notified_at": None, "attempts": 0,
+            })
+        return True
+
+    def list_unattempted_terminal_notifications(self, limit=20):
+        # I4: unsent rows are always listed; attempts never filters.
+        return [r for r in self._outbox.values() if r["notified_at"] is None][:limit]
+
+    def is_terminal_notification_pending(self, task_id):
+        row = self._outbox.get(task_id)
+        return row is not None and row["notified_at"] is None
+
+    def mark_terminal_notification_attempted(self, task_id):
+        row = self._outbox.get(task_id)
+        if row is not None and row["notified_at"] is None:
+            row["attempts"] += 1
+
+    def mark_terminal_notification_sent(self, task_id):
+        row = self._outbox.get(task_id)
+        if row is not None:
+            row["notified_at"] = "sent"
+
+
+class _DummyNotifier:
+    def __init__(self, webhook=None):
+        self.webhook = webhook
+        self.sent = []
+
+    def send_text(self, message, skip_risk_control=False):
+        self.sent.append((self.webhook, message))
+
+    def _clean_url(self, url):
+        return url
+
+
+@pytest.fixture()
+def patched_llm_environment(monkeypatch):
+    """Patch llm_ops module dependencies for isolated testing."""
+    dummy_queue = _DummyQueue()
+    dummy_cache = _DummyCacheManager()
+    sent_terminal = []
+
+    class _FakeRouter:
+        def send_text(self, content, **kwargs):
+            return {"fake": True}
+        def notify_task_status(self, **kwargs):
+            sent_terminal.append(kwargs)
+            return {"fake": True}
+
+    # Patch llm_ops module-level variables
+    monkeypatch.setattr(llm_ops_module, "llm_task_queue", dummy_queue)
+    monkeypatch.setattr(llm_ops_module, "cache_manager", dummy_cache)
+    monkeypatch.setattr(llm_ops_module, "get_notification_router", lambda: _FakeRouter())
+    monkeypatch.setattr(llm_ops_module, "time", SimpleNamespace(sleep=lambda *_: None))
+
+    return {
+        "queue": dummy_queue,
+        "cache": dummy_cache,
+        "sent_terminal": sent_terminal,
+    }
+
+
+def test_llm_tasks_run_concurrently(monkeypatch, patched_llm_environment):
+    """Two LLM tasks should run concurrently (not serialized)."""
+    barrier = threading.Barrier(2, timeout=2)
+    event_log = []
+
+    # Mock llm_coordinator.process to use barrier for synchronization
+    def mock_coordinator_process(**kwargs):
+        task_title = kwargs.get("title", "unknown")
+        event_log.append(("start", task_title))
+        barrier.wait()  # Both tasks must reach here before either proceeds
+        event_log.append(("after_barrier", task_title))
+        return {
+            "calibrated_text": f"calibrated-{task_title}",
+            "summary_text": f"summary-{task_title}",
+            # summary_status must mirror the fact that a real summary_text was
+            # produced -- this mock stands in for LLMCoordinator.process(),
+            # which always sets stats.summary_status alongside summary_text.
+            "stats": {
+                "original_length": 10, "calibrated_length": 8, "summary_length": 5,
+                "calibration_status": "full", "summary_status": "generated",
+            },
+            "models_used": {},
+        }
+
+    mock_coordinator = MagicMock()
+    mock_coordinator.process = mock_coordinator_process
+    monkeypatch.setattr(llm_ops_module, "llm_coordinator", mock_coordinator)
+
+    # Disable task_lock to allow true concurrency
+    from contextlib import contextmanager
+
+    @contextmanager
+    def noop_lock(task_id):
+        yield
+
+    monkeypatch.setattr(llm_ops_module, "task_lock", noop_lock)
+
+    tasks = []
+    for idx in range(2):
+        tasks.append({
+            "task_id": f"task-{idx}",
+            "url": f"https://example.com/video/{idx}",
+            "platform": "youtube",
+            "media_id": f"vid-{idx}",
+            "video_title": f"Video {idx}",
+            "author": f"Author {idx}",
+            "description": "desc",
+            "transcript": f"Transcript {idx}",
+            "use_speaker_recognition": False,
+            "transcription_data": None,
+            "wechat_webhook": None,
+            "is_generic": False,
+        })
+
+    threads = [
+        threading.Thread(target=llm_ops_module._handle_llm_task, args=(task,))
+        for task in tasks
+    ]
+
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=3)
+        assert not thread.is_alive(), "LLM worker thread did not finish"
+
+    # Both start events should appear before any after_barrier event
+    start_events = [evt for evt, _ in event_log if evt == "start"]
+    assert len(start_events) == 2, f"Expected 2 start events, got {len(start_events)}"
+
+    # Queue should have completed both tasks
+    assert patched_llm_environment["queue"].completed == 2
+
+    # Each task is delivered through exactly one terminal status notification.
+    assert len(patched_llm_environment["sent_terminal"]) == 2
+
+    # Each task saves calibrated and summary results
+    assert len(patched_llm_environment["cache"].saved) == 4  # 2 tasks x 2 results each

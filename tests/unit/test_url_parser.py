@@ -1,0 +1,507 @@
+"""
+Unit tests for URLParser module
+
+Test coverage:
+- URL parsing for all platforms (YouTube, Bilibili, Douyin, Xiaohongshu, Xiaoyuzhou)
+- Short URL resolution
+- Generic URL handling
+- Error handling
+"""
+
+import pytest
+from unittest.mock import patch, Mock
+from src.video_transcript_api.utils.url_parser import URLParser, ParsedURL, parse_url, extract_platform
+
+
+class TestURLParserBasic:
+    """Test basic URL parsing functionality"""
+
+    def test_youtube_standard_url(self):
+        """Test standard YouTube URL parsing"""
+        parser = URLParser()
+        result = parser.parse("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+
+        assert result.platform == "youtube"
+        assert result.video_id == "dQw4w9WgXcQ"
+        assert not result.is_short_url
+        assert result.original_url == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+    def test_youtube_short_url(self):
+        """Test YouTube short URL (youtu.be)"""
+        parser = URLParser()
+        # Mock the HTTP HEAD request
+        with patch('requests.head') as mock_head:
+            mock_response = Mock()
+            mock_response.url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+            mock_head.return_value = mock_response
+
+            result = parser.parse("https://youtu.be/dQw4w9WgXcQ")
+
+            assert result.platform == "youtube"
+            assert result.video_id == "dQw4w9WgXcQ"
+            assert result.is_short_url
+
+    def test_youtube_shorts_url(self):
+        """Test YouTube Shorts URL"""
+        parser = URLParser()
+        result = parser.parse("https://www.youtube.com/shorts/dQw4w9WgXcQ")
+
+        assert result.platform == "youtube"
+        assert result.video_id == "dQw4w9WgXcQ"
+
+    def test_youtube_live_url(self):
+        """Test YouTube Live URL"""
+        parser = URLParser()
+        result = parser.parse("https://www.youtube.com/live/dQw4w9WgXcQ")
+
+        assert result.platform == "youtube"
+        assert result.video_id == "dQw4w9WgXcQ"
+
+    def test_bilibili_bv_url(self):
+        """Test Bilibili BV URL"""
+        parser = URLParser()
+        result = parser.parse("https://www.bilibili.com/video/BV1xx411c7mD")
+
+        assert result.platform == "bilibili"
+        assert result.video_id == "BV1xx411c7mD"
+        assert not result.is_short_url
+
+    def test_bilibili_av_url(self):
+        """Test Bilibili AV URL"""
+        parser = URLParser()
+        result = parser.parse("https://www.bilibili.com/video/av12345678")
+
+        assert result.platform == "bilibili"
+        assert result.video_id == "av12345678"
+
+    def test_bilibili_short_url(self):
+        """Test Bilibili short URL (b23.tv)"""
+        parser = URLParser()
+        with patch('requests.head') as mock_head:
+            mock_response = Mock()
+            mock_response.url = "https://www.bilibili.com/video/BV1xx411c7mD"
+            mock_head.return_value = mock_response
+
+            result = parser.parse("https://b23.tv/abc123")
+
+            assert result.platform == "bilibili"
+            assert result.video_id == "BV1xx411c7mD"
+            assert result.is_short_url
+
+    def test_douyin_url(self):
+        """Test Douyin URL"""
+        parser = URLParser()
+        result = parser.parse("https://www.douyin.com/video/7123456789012345678")
+
+        assert result.platform == "douyin"
+        assert result.video_id == "7123456789012345678"
+
+    def test_xiaohongshu_url(self):
+        """Test Xiaohongshu URL"""
+        parser = URLParser()
+        result = parser.parse("https://www.xiaohongshu.com/explore/64abc123def456gh7890ijkl")
+
+        assert result.platform == "xiaohongshu"
+        assert result.video_id == "64abc123def456gh7890ijkl"
+
+    def test_xiaoyuzhou_url(self):
+        """Test Xiaoyuzhou URL"""
+        parser = URLParser()
+        result = parser.parse("https://www.xiaoyuzhoufm.com/episode/687893e0a12f9ff06a98a597")
+
+        assert result.platform == "xiaoyuzhou"
+        assert result.video_id == "687893e0a12f9ff06a98a597"
+
+    def test_apple_podcast_episode_url(self):
+        """Test Apple Podcast episode URL (video_id is the episode id)"""
+        parser = URLParser()
+        result = parser.parse(
+            "https://podcasts.apple.com/us/podcast/lex-fridman-podcast/id1434243584?i=1000774912806"
+        )
+
+        assert result.platform == "apple_podcast"
+        assert result.video_id == "1000774912806"
+
+    def test_apple_podcast_show_url(self):
+        """Test Apple Podcast show URL (falls back to show id)"""
+        parser = URLParser()
+        result = parser.parse(
+            "https://podcasts.apple.com/us/podcast/lex-fridman-podcast/id1434243584"
+        )
+
+        assert result.platform == "apple_podcast"
+        assert result.video_id == "1434243584"
+
+    def test_wechat_channels_url(self):
+        """Test WeChat Channels URL"""
+        parser = URLParser()
+        result = parser.parse("https://weixin.qq.com/sph/AOzokRxWHz")
+
+        assert result.platform == "wechat_channels"
+        assert result.video_id == "AOzokRxWHz"
+        assert not result.is_short_url
+        assert result.original_url == "https://weixin.qq.com/sph/AOzokRxWHz"
+
+    @pytest.mark.parametrize("url,expected_id", [
+        ("https://x.com/someuser/status/1234567890", "1234567890"),
+        ("https://twitter.com/someuser/status/1234567890", "1234567890"),
+        ("https://mobile.twitter.com/someuser/status/1234567890", "1234567890"),
+        ("https://www.x.com/someuser/status/1234567890", "1234567890"),
+        ("https://x.com/someuser/status/1234567890?s=20&t=abcdef", "1234567890"),
+        ("https://twitter.com/someuser/status/1234567890?s=20", "1234567890"),
+        ("https://x.com/someuser/status/1234567890/video/1", "1234567890"),
+        ("https://twitter.com/someuser/statuses/1234567890", "1234567890"),
+    ])
+    def test_twitter_url_parsing(self, url, expected_id):
+        """Test X(Twitter) URL parsing for various domain/subdomain/path formats"""
+        parser = URLParser()
+        result = parser.parse(url)
+
+        assert result.platform == "twitter"
+        assert result.video_id == expected_id
+        assert not result.is_short_url
+        assert result.original_url == url
+
+    @pytest.mark.parametrize("url", [
+        "https://x.com/someuser/status/1234567890",
+        "https://twitter.com/someuser/status/1234567890",
+        "https://mobile.twitter.com/someuser/status/1234567890",
+        "https://x.com/someuser",
+        "https://twitter.com/someuser",
+    ])
+    def test_twitter_extract_platform(self, url):
+        """Test extract_platform identifies X(Twitter) correctly"""
+        assert extract_platform(url) == "twitter"
+
+    @pytest.mark.parametrize("url", [
+        "https://notx.com/u/status/1234567890",
+        "https://x.com.evil.com/u/status/1234567890",
+        "https://example.com/?q=x.com",
+        "https://example.com/notx.com/status/123",
+        "https://example.com/x.com/status/123",
+    ])
+    def test_twitter_false_positives(self, url):
+        """Test host-boundary matching prevents false positives for x.com"""
+        parser = URLParser()
+        result = parser.parse(url)
+        assert result.platform != "twitter"
+        assert extract_platform(url) != "twitter"
+
+    @pytest.mark.parametrize("url,expected_id", [
+        ("https://x.com/i/spaces/1AKEmvYqbrOKL", "1AKEmvYqbrOKL"),
+        ("https://twitter.com/i/spaces/1AKEmvYqbrOKL", "1AKEmvYqbrOKL"),
+        ("https://mobile.twitter.com/i/spaces/1AKEmvYqbrOKL", "1AKEmvYqbrOKL"),
+        ("https://www.x.com/i/spaces/1AKEmvYqbrOKL", "1AKEmvYqbrOKL"),
+        ("https://x.com/i/spaces/1AKEmvYqbrOKL/peek", "1AKEmvYqbrOKL"),
+        ("https://x.com/i/spaces/1AKEmvYqbrOKL/peek?s=20", "1AKEmvYqbrOKL"),
+        ("https://x.com/i/spaces/1AKEmvYqbrOKL/", "1AKEmvYqbrOKL"),
+        ("https://x.com/i/spaces/1AKEmvYqbrOKL?s=20", "1AKEmvYqbrOKL"),
+    ])
+    def test_twitter_space_url_parsing(self, url, expected_id):
+        """X Space replay links parse as twitter_space, never as twitter/generic."""
+        parser = URLParser()
+        result = parser.parse(url)
+
+        assert result.platform == "twitter_space"
+        assert result.video_id == expected_id
+        assert not result.is_short_url
+        assert result.original_url == url
+        assert extract_platform(url) == "twitter_space"
+
+    def test_twitter_space_id_length_enforced(self):
+        """Resolver only accepts 13-char Space ids, so the parser must not
+        hand a wrong-length id downstream as if it were a valid Space."""
+        parser = URLParser()
+        result = parser.parse("https://x.com/i/spaces/short")
+        assert result.platform != "twitter_space"
+
+    @pytest.mark.parametrize("url,expected_id", [
+        ("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "dQw4w9WgXcQ"),
+        ("https://m.youtube.com/watch?v=dQw4w9WgXcQ", "dQw4w9WgXcQ"),
+        ("https://www.youtube.com/watch?list=PLtest&v=dQw4w9WgXcQ", "dQw4w9WgXcQ"),
+        ("https://www.youtube.com/shorts/dQw4w9WgXcQ", "dQw4w9WgXcQ"),
+        ("https://www.youtube.com/live/dQw4w9WgXcQ", "dQw4w9WgXcQ"),
+        ("https://www.youtube.com/embed/dQw4w9WgXcQ", "dQw4w9WgXcQ"),
+    ])
+    def test_youtube_legal_forms(self, url, expected_id):
+        """YouTube legal forms must stay youtube (issue #75)."""
+        # Non-short URLs never touch the network: parse without any mock.
+        parser = URLParser()
+        result = parser.parse(url)
+        assert result.platform == "youtube"
+        assert result.video_id == expected_id
+
+    def test_youtube_short_link_form(self):
+        """youtu.be short link resolves without real network (issue #75)."""
+        parser = URLParser()
+        with patch('requests.head') as mock_head:
+            mock_response = Mock()
+            mock_response.url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+            mock_head.return_value = mock_response
+            result = parser.parse("https://youtu.be/dQw4w9WgXcQ")
+        assert result.platform == "youtube"
+        assert result.video_id == "dQw4w9WgXcQ"
+
+    @pytest.mark.parametrize("url", [
+        "https://example.com/watch?v=d84",
+        "https://video.twimg.com/amplify_video/2098781203050405894/pl/U6mq-9ejWo_YqRl5.m3u8?tag=29&v=d84&variant_version=1",
+    ])
+    def test_non_youtube_v_param_not_youtube(self, url):
+        """Non-YouTube URLs with v= must not parse as youtube (issue #75)."""
+        parser = URLParser()
+        result = parser.parse(url)
+        assert result.platform != "youtube"
+        assert result.video_id != "d84"
+
+    @pytest.mark.parametrize("url", [
+        "https://example.com/watch?v=d84",
+        "https://video.twimg.com/amplify_video/2098781203050405894/pl/U6mq-9ejWo_YqRl5.m3u8?tag=29&v=d84&variant_version=1",
+    ])
+    def test_non_youtube_v_param_extract_platform(self, url):
+        """extract_platform must agree: no youtube for v= on other hosts."""
+        assert extract_platform(url) != "youtube"
+
+    def test_generic_url(self):
+        """Test generic URL (no platform matched)"""
+        parser = URLParser()
+        result = parser.parse("https://example.com/video/123")
+
+        assert result.platform == "generic"
+        assert len(result.video_id) == 16  # MD5 hash (16 chars)
+        assert not result.is_short_url
+
+
+class TestURLParserShortURL:
+    """Test short URL resolution"""
+
+    def test_short_url_resolution_success(self):
+        """Test successful short URL resolution"""
+        parser = URLParser()
+        with patch('requests.head') as mock_head:
+            mock_response = Mock()
+            mock_response.url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+            mock_head.return_value = mock_response
+
+            result = parser.parse("https://youtu.be/short123")
+
+            assert result.is_short_url
+            assert mock_head.called
+            assert mock_head.call_args[0][0] == "https://youtu.be/short123"
+
+    def test_short_url_resolution_timeout(self):
+        """Test short URL resolution with timeout"""
+        parser = URLParser()
+        with patch('requests.head') as mock_head:
+            import requests
+            mock_head.side_effect = requests.exceptions.Timeout("Timeout")
+
+            # Should fall back to original URL
+            result = parser.parse("https://youtu.be/short123")
+
+            assert result.is_short_url
+            # Should use original URL since resolution failed
+            assert result.normalized_url == "https://youtu.be/short123"
+
+    def test_short_url_resolution_network_error(self):
+        """Test short URL resolution with network error"""
+        parser = URLParser()
+        with patch('requests.head') as mock_head:
+            import requests
+            mock_head.side_effect = requests.exceptions.RequestException("Network error")
+
+            result = parser.parse("https://youtu.be/short123")
+
+            assert result.is_short_url
+            assert result.normalized_url == "https://youtu.be/short123"
+
+
+class TestURLParserErrorHandling:
+    """Test error handling"""
+
+    def test_empty_url(self):
+        """Test empty URL raises ValueError"""
+        parser = URLParser()
+        with pytest.raises(ValueError, match="URL must be a non-empty string"):
+            parser.parse("")
+
+    def test_none_url(self):
+        """Test None URL raises ValueError"""
+        parser = URLParser()
+        with pytest.raises(ValueError, match="URL must be a non-empty string"):
+            parser.parse(None)
+
+    def test_invalid_url_returns_generic(self):
+        """Test invalid URL returns generic platform"""
+        parser = URLParser()
+        result = parser.parse("not-a-valid-url")
+
+        assert result.platform == "generic"
+        assert len(result.video_id) == 16
+
+
+class TestURLParserConvenienceFunctions:
+    """Test convenience functions"""
+
+    def test_parse_url_function(self):
+        """Test parse_url convenience function"""
+        result = parse_url("https://www.youtube.com/watch?v=test123")
+
+        assert isinstance(result, ParsedURL)
+        assert result.platform == "youtube"
+        assert result.video_id == "test123"
+
+    def test_extract_platform_function(self):
+        """Test extract_platform convenience function"""
+        platform = extract_platform("https://www.youtube.com/watch?v=test123")
+        assert platform == "youtube"
+
+        platform = extract_platform("https://www.bilibili.com/video/BV1test")
+        assert platform == "bilibili"
+
+        platform = extract_platform("https://weixin.qq.com/sph/AOzokRxWHz")
+        assert platform == "wechat_channels"
+
+        platform = extract_platform("https://example.com/video/123")
+        assert platform == "generic"
+
+
+class TestURLParserEdgeCases:
+    """Test edge cases and special scenarios"""
+
+    def test_url_with_query_parameters(self):
+        """Test URL with multiple query parameters"""
+        parser = URLParser()
+        result = parser.parse("https://www.youtube.com/watch?v=test123&t=30s&list=PLtest")
+
+        assert result.platform == "youtube"
+        assert result.video_id == "test123"
+
+    def test_url_with_fragment(self):
+        """Test URL with fragment"""
+        parser = URLParser()
+        result = parser.parse("https://www.youtube.com/watch?v=test123#comment")
+
+        assert result.platform == "youtube"
+        assert result.video_id == "test123"
+
+    def test_url_case_sensitivity(self):
+        """Test URL parsing is case-insensitive for domains"""
+        parser = URLParser()
+        result = parser.parse("https://WWW.YOUTUBE.COM/watch?v=test123")
+
+        assert result.platform == "youtube"
+        assert result.video_id == "test123"
+
+    def test_duplicate_parsing(self):
+        """Test parsing the same URL twice returns consistent results"""
+        parser = URLParser()
+        url = "https://www.youtube.com/watch?v=test123"
+
+        result1 = parser.parse(url)
+        result2 = parser.parse(url)
+
+        assert result1.platform == result2.platform
+        assert result1.video_id == result2.video_id
+
+    def test_hash_id_consistency(self):
+        """Test generic URL hash ID is consistent"""
+        parser = URLParser()
+        url = "https://example.com/video/123"
+
+        result1 = parser.parse(url)
+        result2 = parser.parse(url)
+
+        assert result1.video_id == result2.video_id
+        assert len(result1.video_id) == 16
+
+
+# Production fixture: real 302 Location for https://xhslink.cn/o/2SDXgXldd0a
+# (2026-09-21, GET with mobile UA). Producer contract — do not simplify.
+XHSLINK_CN_SHORT = "https://xhslink.cn/o/2SDXgXldd0a"
+XHSLINK_CN_LONG = (
+    "https://www.xiaohongshu.com/discovery/item/6aafeb9a000000002b0275ff"
+    "?app_platform=android&ignoreEngage=true&app_version=9.46.1"
+    "&share_from_user_hidden=true&xsec_source=app_share&type=video"
+    "&xsec_token=CB24bGFHn-ES913xIejqR5V6aQGE_jGKZXujm3veWoz8c%3D"
+    "&author_share=1&xhsshare=CopyLink&shareRedId=NztDNjg2PU48PkdFPz0zRzozQEk1NzpB"
+    "&apptime=1789951860&share_id=2006952a55e441e5a7cbf6d20be50cc7"
+    "&share_channel=copy_link&track_code=2SDXgXldd0a"
+)
+
+
+class TestXhslinkCn:
+    """xhslink.cn short links resolve to xiaohongshu notes."""
+
+    def test_is_short_url(self):
+        assert URLParser()._is_short_url(XHSLINK_CN_SHORT) is True
+
+    def test_parse_production_fixture(self):
+        parser = URLParser()
+        head_resp = Mock()
+        head_resp.status_code = 404
+        head_resp.url = XHSLINK_CN_SHORT
+        get_resp = Mock()
+        get_resp.url = XHSLINK_CN_LONG
+        with patch("requests.head", return_value=head_resp) as mock_head, \
+             patch("requests.get", return_value=get_resp) as mock_get:
+            result = parser.parse(XHSLINK_CN_SHORT)
+            assert mock_head.called
+            assert mock_get.called
+        assert result.platform == "xiaohongshu"
+        assert result.video_id == "6aafeb9a000000002b0275ff"
+        assert result.is_short_url is True
+
+    def test_expansion_sends_user_agent(self):
+        from src.video_transcript_api.utils.url_parser import SHORT_URL_USER_AGENT
+        parser = URLParser()
+        head_resp = Mock()
+        head_resp.status_code = 404
+        head_resp.url = XHSLINK_CN_SHORT
+        get_resp = Mock()
+        get_resp.url = XHSLINK_CN_LONG
+        with patch("requests.head", return_value=head_resp) as mock_head, \
+             patch("requests.get", return_value=get_resp) as mock_get:
+            parser.parse(XHSLINK_CN_SHORT)
+        for mock_call in (mock_head, mock_get):
+            headers = mock_call.call_args.kwargs.get("headers") or {}
+            assert headers.get("User-Agent") == SHORT_URL_USER_AGENT
+
+    def test_xhslink_com_expansion_sends_user_agent(self):
+        from src.video_transcript_api.utils.url_parser import SHORT_URL_USER_AGENT
+        parser = URLParser()
+        head_resp = Mock()
+        head_resp.status_code = 404
+        head_resp.url = "https://xhslink.com/o/2SDXgXldd0a"
+        get_resp = Mock()
+        get_resp.url = XHSLINK_CN_LONG
+        with patch("requests.head", return_value=head_resp) as mock_head, \
+             patch("requests.get", return_value=get_resp) as mock_get:
+            parser.parse("https://xhslink.com/o/2SDXgXldd0a")
+        for mock_call in (mock_head, mock_get):
+            headers = mock_call.call_args.kwargs.get("headers") or {}
+            assert headers.get("User-Agent") == SHORT_URL_USER_AGENT
+
+    def test_douyin_expansion_sends_no_user_agent(self):
+        """v.douyin.com must expand without UA (mobile UA resolves to iesdouyin)."""
+        parser = URLParser()
+        short = "https://v.douyin.com/iRNBho6u/"
+        long = "https://www.douyin.com/video/7298145681699622182"
+        head_resp = Mock()
+        head_resp.status_code = 404
+        head_resp.url = short
+        get_resp = Mock()
+        get_resp.url = long
+        with patch("requests.head", return_value=head_resp) as mock_head, \
+             patch("requests.get", return_value=get_resp) as mock_get:
+            result = parser.parse(short)
+        for mock_call in (mock_head, mock_get):
+            assert mock_call.call_args.kwargs.get("headers") is None
+        assert result.platform == "douyin"
+        assert result.video_id == "7298145681699622182"
+
+    def test_extract_platform(self):
+        assert extract_platform(XHSLINK_CN_SHORT) == "xiaohongshu"
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v", "--tb=short"])

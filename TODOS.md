@@ -1,0 +1,165 @@
+# TODOS
+
+## P2: API 速率限制
+
+**What:** 加入基于 IP/Token 的简单速率限制，防止资源耗尽和暴力破解。
+
+**Why:** 当前任何持有有效 Token 的用户可以无限提交任务，无效 Token 尝试无日志警告。
+
+**Pros:** 安全基础设施，防止资源滥用。
+
+**Cons:** 当前用户量小，优先级不高。
+
+**Context:** 可用 FastAPI 的 slowapi 或自定义中间件。需决定限制粒度（每分钟/每小时）和限制值。
+
+**Effort:** S（人工）→ S（CC）
+
+**Priority:** P2
+
+**Depends on:** 无
+
+---
+
+## P2: 内存缓存 TTL/LRU 限制
+
+**What:** 为下载器内存缓存（generic.py 的 `_cached_video_info`）加入 TTL 或 LRU 限制。
+
+**Why:** 当前内存缓存永不过期，长时间运行可能内存泄漏。
+
+**Pros:** 防止内存泄漏，提高长期稳定性。
+
+**Cons:** 改动小，风险低。
+
+**Context:** 可用 `functools.lru_cache` 或 `cachetools.TTLCache`。建议 TTL=1h，maxsize=1000。
+
+**Effort:** S（人工）→ S（CC）
+
+**Priority:** P2
+
+**Depends on:** 无
+
+---
+
+## P2: 确定性 key_info 专有名词兜底替换
+
+**What:** 在 LLM 校对之后，加一道确定性后处理：对 key_info 的 brands/names，用程序规则扫描校对稿里的近音错写并直接替换（如"微煌/威煌"→"威皇"），作为 LLM 没改对时的兜底。
+
+**Why:** ID 锚点重设计保证 LLM "有机会"应用 key_info，但不保证它"一定"会把近音字纠正过来；专有名词（店名/人名）这类高价值错误仍可能漏。
+
+**Pros:** 专有名词纠错从"靠 LLM 自觉"变成"确定性保证"，高价值错误不再漏。
+
+**Cons:** 误替换风险（正常词被错改）；需维护近音变体生成（拼音编辑距离）+ 词边界规则 + 严格误替换测试覆盖。blast radius 大。
+
+**Context:** 触发源为 VOL.170「威皇小海鲜」案例。本次 ID 锚点 PR 先修结构病（整块回退导致零校对），观察 ID 修复后该类错误残留率，再决定是否引入。建议限定：仅对 brands/names，仅在拼音编辑距离 ≤ 阈值的高置信近音区间替换，且加词边界保护。eng-review 决定推迟（2026-06-18）。
+
+**Effort:** M（人工）→ S（CC）
+
+**Priority:** P2
+
+**Depends on:** ID 锚点校对重设计先落地
+
+---
+
+## P2: BBDown 监督器边界加固
+
+**What:** 在有明确生产复现或跨平台需求后，评估收紧 BBDown 监督器在媒体校验、输出读取、线程收尾、短链分 P 与 Windows 进程清理上的边界。
+
+**Why:** 当前根因修复已通过连续两轮无新增 P1 的独立 review gate；以下是已接受、暂不为本次修复引入额外机制的边界：
+
+- `ffprobe` 媒体验证最多可额外耗时 30 秒，尚未计入 `bbdown.timeout`。这不影响下载正确性；生产默认预算为 300 秒，常规本地文件校验很快；若纳入预算，需要改动基类超时接口并新增机制。
+- 输出以 `readline` 读取；若 BBDown 仅用 `\r` 刷进度，文件出现前可能被误判为约 20 秒停滞。目录中文件变化仍是主要活动信号，尚无生产复现；改为按字节的非阻塞跨平台读取会增加机制。
+- reader thread 在 `join(0.1)` 后，诊断输出 deque 理论上仍可能并发读写。这是低概率的诊断输出边界，不影响媒体产物；修复需要新增同步机制。
+- 原始 `b23` 短链带显式 `p` 参数时，若重定向目标丢失该参数，可能回退到 P1。当前任务覆盖单 P 短链且未发现此问题；这是少见输入边界，修复不应阻塞本次根因修复。
+- Windows 上父进程先退出后，无法严格证明子进程树已清净；强制 `taskkill /F` 也未设置 timeout。生产目标 n305 是 Linux，Windows 尚未真机验证；彻底处理需要 Job Object 或额外机制。
+
+**Pros:** 将后续边界加固与已完成的根因修复分离，保留明确的触发条件和取舍。
+
+**Cons:** 在出现上述少见场景前，仍保留对应的诊断或跨平台不确定性。
+
+**Context:** 仅在出现生产复现、Windows 真机验证需求或需要统一端到端总预算时再排期；不得以此回滚当前已通过的下载监督器修复。
+
+**Effort:** M（人工）→ M（CC）
+
+**Priority:** P2
+
+**Depends on:** BBDown 监督器根因修复已上线并持续观测
+
+---
+
+## P3: 转录服务换行格式与已接受的 CI Review nit
+
+**What:** 仅在单独的格式化 PR 中，评估将 `src/video_transcript_api/api/services/transcription.py` 的历史 CRLF 换行统一为项目格式，并在跨平台环境验证；同时再评估 PR #28 CI Agent Review 已接受的两个 nit：顶层配置/可执行检查异常少一层 `logger.exception`，以及成功路径的 `rmtree`/`untrack` 与 `finally` 的幂等重复。另记录 PR #29 CI Agent Review nit：`url_parse_attempted` 在 API 路径恒为 `True`、直接调用默认 `False`，名称可能让人误以为 API 内部存在 `False` 分支。
+
+**Why:** 当前文件的历史 CRLF 会让全文件 `git diff --check` 将新增行报告为 trailing whitespace，但不影响运行或测试。本次接受不修：统一换行会制造 2400+ 行无关 patch，违反小修复做减法。两个 CI Review nit 也都不影响正确性，本次不为诊断或可读性改变控制流。`url_parse_attempted` 的三分支语义和向后兼容均正确；改名仅改善认知且会扩大无收益改动，因此本次接受不修。
+
+**Pros:** 将格式化、跨平台验证与控制流可读性改进放在可独立审查的范围内，避免掩盖功能修复。
+
+**Cons:** 在单独 PR 排期前，`git diff --check` 对该 CRLF 文件的新增行仍会产生噪音；异常诊断层级和清理路径重复也暂时保留。
+
+**Context:** 只有在单独格式化 PR 且完成跨平台验证时处理换行；届时可一并决定是否补充顶层 `logger.exception` 或整理成功路径清理，但不能以这些 nit 回溯修改当前短链修复。
+
+**Effort:** S（人工）→ S（CC）
+
+**Priority:** P3
+
+**Depends on:** 无
+
+---
+
+## P2: Web Push 后端（任务完成推送，页面关闭也可达）
+
+**What:** VAPID 密钥管理 + 推送订阅存储 + 任务完成时触发 Web Push，让 PWA 在页面关闭后也能收到任务完成通知。
+
+**Why:** PWA 化的 E5 只交付了简化版（页面打开时 Notification API）。"提交后去干别的，完成弹通知"的完整闭环需要真推送。这是 CEO Plan `2026-07-28-pwa-installable` 的 Phase 2。
+
+**Pros:** 完成 10x 路径最后一块；SW 基建、通知权限 UX 在 PWA 化时已就位，边际成本集中在中后端。
+
+**Cons:** 引入订阅存储（SQLite 新表）和推送服务依赖（或自研 VAPID 签名）；需要处理订阅失效清理。
+
+**Context:** 切入点：SW 已监听 push 事件的位置在 `src/web/static/sw.js`（PWA 化落地后）；订阅端点挂在 `/api/` 下并走 Bearer 鉴权；任务完成钩子参考企微/飞书通知的触发点。评审记录见 `~/.gstack/projects/zlxlabs-VideoTranscriptAPI/ceo-plans/2026-07-28-pwa-installable.md`。
+
+**Effort:** L（人工 3-5 天）→ M（CC 2-3 小时）
+
+**Priority:** P2
+
+**Depends on:** PWA 化（feat/pwa-installable）先落地
+
+---
+
+## P3: vitest 接入 CI（共享 gate workflow 支持 node）
+
+**What:** 让 CI（zlxlabs/gate reusable workflow，tier: personal）执行 `npx vitest run`，或在仓库内加独立 JS 测试 workflow。
+
+**Why:** PWA 化引入 vitest 测 SW 决策表/分享预填/轮询终态等纯函数；CI 不跑则测试逐渐腐烂。
+
+**Pros:** JS 测试有强制力，与 pytest 同等级保障。
+
+**Cons:** 依赖共享 gate 仓库是否支持 node 工具链，时间不可控；或需本仓库独立 workflow（与 gate 并存）。
+
+**Context:** 触发点：`docs/designs/pwa.md` 的 T8 落地后。先确认 gate 是否已有 node 支持；没有则评估本仓库加 `js-test.yml`（actions/setup-node + npx vitest run）。
+
+**Effort:** S（人工）→ S（CC）
+
+**Priority:** P3
+
+**Depends on:** PWA 化 T8（vitest 工具链落地）
+
+---
+
+## P3: 建立 DESIGN.md（设计系统权威出处）
+
+**What:** 编写仓库根 DESIGN.md，固化品牌色（indigo #4f46e5/#667eea）、按钮与组件词汇、交互状态规范（loading/empty/error/success）、无障碍基线（44px 触控、对比度、aria 约定）。
+
+**Why:** PWA 化评审发现设计决策只散落在 styles.css 和各页面内联样式里，没有权威出处；每次设计评审都从零校准。
+
+**Pros:** 新组件有参照系；design review 效率和质量提升；AI 生成 UI 时有一致的约束输入。
+
+**Cons:** 需要一次盘点现有样式的梳理工作；后续要维护。
+
+**Context:** 切入点：PWA 化落地的设计规格（docs/designs/pwa.md 的"设计规格"一节）可作为第一章；styles.css 的 CSS 变量和 history.html 的 --accent-primary 等 token 是素材。
+
+**Effort:** M（人工）→ S（CC）
+
+**Priority:** P3
+
+**Depends on:** 无（PWA 化完成后内容更全）
