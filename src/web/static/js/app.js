@@ -20,6 +20,13 @@ const APP_CONFIG = {
 const AUTH_STORAGE_ERROR_MESSAGE = () => window.t('web.transcript.auth_module_failed');
 let authStorageErrorShown = false;
 
+/**
+ * Open-source product surface is link transcription only.
+ * Local audio/video upload controls stay hidden even if the server
+ * reports upload capabilities as enabled.
+ */
+const YUEGAO_LINK_ONLY = true;
+
 // 全局变量
 let currentTask = null;
 let isAdvancedSettingsExpanded = false;
@@ -1383,7 +1390,7 @@ function applyUploadFeatureVisibility(enabled) {
     const uploadPanel = document.getElementById('upload-mode-panel');
     const modeTabs = document.getElementById('mode-tabs') || document.querySelector('.mode-tabs');
     const banner = document.getElementById('upload-disabled-banner');
-    const on = enabled === true;
+    const on = !YUEGAO_LINK_ONLY && enabled === true;
     if (uploadTab) uploadTab.hidden = !on;
     if (uploadPanel) {
         uploadPanel.hidden = !on || currentMode !== 'upload';
@@ -1417,6 +1424,9 @@ function applyUploadFeatureVisibility(enabled) {
 }
 
 function switchMode(mode) {
+    if (YUEGAO_LINK_ONLY && mode === 'upload') {
+        mode = 'url';
+    }
     currentMode = mode;
     if (typeof document !== 'undefined') {
         const urlTab = document.getElementById('mode-tab-url');
@@ -1495,9 +1505,10 @@ async function checkUploadCapabilities() {
         if (caps && caps.enabled === true && isFiniteLimit) {
             uploadCapabilities = caps;
             uploadCapabilitiesIdentity = requestIdentity;
-            applyUploadFeatureVisibility(true);
+            // Record capabilities for dormant helpers, but never reveal the upload UI.
+            applyUploadFeatureVisibility(YUEGAO_LINK_ONLY ? false : true);
             if (banner) banner.hidden = true;
-            if (hint) {
+            if (hint && !YUEGAO_LINK_ONLY) {
                 hint.textContent = window.t('web.js.limits_hint', { mib: caps.limits.max_file_mib, hours: caps.limits.max_media_hours });
             }
         } else {
@@ -1784,7 +1795,7 @@ function initializePage() {
     
     const form = document.getElementById('transcribe-form');
     form.addEventListener('submit', (e) => {
-        if (currentMode === 'upload') {
+        if (!YUEGAO_LINK_ONLY && currentMode === 'upload') {
             submitUploadForm(e);
         } else {
             submitTranscription(e);
@@ -1795,7 +1806,7 @@ function initializePage() {
     const urlTab = document.getElementById('mode-tab-url');
     const uploadTab = document.getElementById('mode-tab-upload');
     if (urlTab) urlTab.addEventListener('click', () => switchMode('url'));
-    if (uploadTab) uploadTab.addEventListener('click', () => switchMode('upload'));
+    if (uploadTab && !YUEGAO_LINK_ONLY) uploadTab.addEventListener('click', () => switchMode('upload'));
 
     // 设置上传拖拽与点击选择
     setupUploadDropZone();

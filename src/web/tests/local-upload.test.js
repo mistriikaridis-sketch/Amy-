@@ -171,29 +171,23 @@ describe('local upload frontend logic', () => {
     }
   });
 
-  it('switches between URL mode and Upload mode without breaking URL transcription', async () => {
+  it('stays on link transcription even if upload capabilities are enabled', async () => {
     await installIndexPage();
-    const { document } = dom.window;
+    const { document, switchMode } = dom.window;
 
     const uploadTab = document.getElementById('mode-tab-upload');
-    const urlTab = document.getElementById('mode-tab-url');
     const urlPanel = document.getElementById('url-mode-panel');
     const uploadPanel = document.getElementById('upload-mode-panel');
+    const modeTabs = document.getElementById('mode-tabs');
 
     expect(uploadTab).toBeTruthy();
-    expect(urlTab).toBeTruthy();
-
-    // Default is URL mode
+    expect(modeTabs.hidden).toBe(true);
+    expect(uploadTab.hidden).toBe(true);
     expect(urlPanel.hidden).toBe(false);
     expect(uploadPanel.hidden).toBe(true);
 
-    // Switch to upload mode
     uploadTab.click();
-    expect(urlPanel.hidden).toBe(true);
-    expect(uploadPanel.hidden).toBe(false);
-
-    // Switch back to URL mode
-    urlTab.click();
+    switchMode('upload');
     expect(urlPanel.hidden).toBe(false);
     expect(uploadPanel.hidden).toBe(true);
   });
@@ -212,13 +206,9 @@ describe('local upload frontend logic', () => {
 
     document.getElementById('mode-tab-upload').click();
     const banner = document.getElementById('upload-disabled-banner');
-    expect(banner.hidden).toBe(false);
-
-    const file = new window.File(['abc'], 'clip.mp4', { type: 'video/mp4' });
-    window.selectUploadFile(file);
-
-    const submitBtn = document.getElementById('submit-btn');
-    expect(submitBtn.disabled).toBe(true);
+    expect(banner.hidden).toBe(true);
+    expect(document.getElementById('upload-mode-panel').hidden).toBe(true);
+    expect(document.getElementById('url-mode-panel').hidden).toBe(false);
   });
 
   it('rejects files exceeding limits.max_file_mib', async () => {
