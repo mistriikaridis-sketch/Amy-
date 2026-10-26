@@ -1,7 +1,18 @@
-# 阅稿 / Yuegao — العربية
+# يويغاو Yuegao — العربية
 
-حوّل الروابط إلى نصوص قابلة للقراءة. تشغيل محلي. لا مفاتيح API في المستودع. راجع [English](README.en.md) / [中文](README.md).
+[中文](README.md) | [English](README.en.md) | **العربية**
 
-- UI languages: zh-CN, en, ja, ko, es, fr, pt, de, ru, ar
-- Install: see [README.en.md](README.en.md)
-- License: [PolyForm Noncommercial](LICENSE)
+يحوّل الرابط إلى نص مقروء. يعمل محلياً: الصق رابط فيديو أو بودكاست أو صوت، ثم افتح صفحة القراءة.
+
+لا يوجد رفع لملفات صوت أو فيديو محلية. المستودع لا يتضمن مفاتيح API. انسخ `config/config.example.jsonc` إلى `config/config.jsonc` وضع مفتاح النموذج اللغوي الخاص بك.
+
+```bash
+uv sync
+cp config/config.example.jsonc config/config.jsonc
+cp config/users.example.json config/users.json
+uv run python main.py --check-config --config config/config.jsonc
+uv run python main.py --start
+```
+
+لغات الواجهة: zh-CN, en, ja, ko, es, fr, pt, de, ru, ar.  
+الترخيص: [PolyForm Noncommercial](LICENSE). الدليل الكامل: [English](README.en.md).

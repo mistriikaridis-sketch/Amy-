@@ -1,7 +1,18 @@
-# 阅稿 / Yuegao — Deutsch
+# Yuegao — Deutsch
 
-Links zu lesbaren Transkripten. Lokal betreiben. Keine API-Keys im Repo. Siehe [English](README.en.md) / [中文](README.md).
+[中文](README.md) | [English](README.en.md) | **Deutsch**
 
-- UI languages: zh-CN, en, ja, ko, es, fr, pt, de, ru, ar
-- Install: see [README.en.md](README.en.md)
-- License: [PolyForm Noncommercial](LICENSE)
+Macht aus einem Link eine lesbare Abschrift. Lokal ausführen: Video-, Podcast- oder Audio-URL einfügen und die Leseseite öffnen.
+
+Es gibt keinen Upload lokaler Audio- oder Videodateien. API-Schlüssel liegen nicht im Repository. Kopieren Sie `config/config.example.jsonc` nach `config/config.jsonc` und tragen Sie Ihren eigenen LLM-Schlüssel ein.
+
+```bash
+uv sync
+cp config/config.example.jsonc config/config.jsonc
+cp config/users.example.json config/users.json
+uv run python main.py --check-config --config config/config.jsonc
+uv run python main.py --start
+```
+
+Oberflächensprachen: zh-CN, en, ja, ko, es, fr, pt, de, ru, ar.  
+Lizenz: [PolyForm Noncommercial](LICENSE). Vollständige Anleitung: [English](README.en.md).

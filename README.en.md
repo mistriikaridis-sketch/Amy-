@@ -1,16 +1,16 @@
 # Yuegao (阅稿)
 
-[中文](README.md) | **English** | [日本語](README.ja.md) | [Other languages](#documentation-languages)
+[中文](README.md) | **English** | [日本語](README.ja.md) | [한국어](README.ko.md) | [Español](README.es.md) | [Français](README.fr.md) | [Português](README.pt.md) | [Deutsch](README.de.md) | [Русский](README.ru.md) | [العربية](README.ar.md)
 
-> Turn links into readable transcripts. Run locally: paste a video / podcast / audio URL, then open the paper-style reading page.
+> Turn a link into a readable transcript. Run it locally: paste a video, podcast, or audio URL, then open the paper reading page.
 
-**Yuegao** is a local-reading-oriented fork of [VideoTranscriptAPI](https://github.com/zlxlabs/VideoTranscriptAPI).
+The product accepts **links only**. The submit page does not offer local audio or video upload.
 
-**Bring your own keys.** This repository ships **no** production API keys. Copy `config/config.example.jsonc` → `config/config.jsonc` and set your own LLM / optional TikHub tokens. Never commit `config.jsonc`, `users.json`, or `.env`.
+**Bring your own keys.** This repository ships no production API keys. Copy `config/config.example.jsonc` to `config/config.jsonc` and set your own LLM key and optional downloader tokens. Never commit `config.jsonc`, `users.json`, or `.env`.
 
 **License**: [PolyForm Noncommercial License 1.0.0](LICENSE) — noncommercial use only. Keep every `Required Notice:` line.
 
-Package id remains `video-transcript-api`; UI title is 阅稿 / Yuegao. Fork version **1.3.0**.
+The package id remains `video-transcript-api`. The UI title is 阅稿 / Yuegao. Version **1.3.0**.
 
 ![Home](docs/images/home.png)
 
@@ -19,35 +19,37 @@ Package id remains `video-transcript-api`; UI title is 阅稿 / Yuegao. Fork ver
 ```bash
 git clone <your-yuegao-repo-url>
 cd yuegao
+# Install uv: https://docs.astral.sh/uv/
 uv sync
 cp config/config.example.jsonc config/config.jsonc
 cp config/users.example.json config/users.json
-# edit config.jsonc: api.auth_token + llm.api_key / llm.base_url (your own keys)
+# Edit config.jsonc: api.auth_token plus llm.api_key / llm.base_url
 uv run python main.py --check-config --config config/config.jsonc
 uv run python main.py --start
 ```
 
-Smoke: `uv run python scripts/ops/smoke_check.py --base http://127.0.0.1:8200`
+Open the home page in a browser. The example config listens on port `8000`; some deploy notes use `8200`.
 
-Local file upload is **off by default** (`VTA_UPLOADS_ENABLED` must be exactly `true` to enable). The UI only shows link transcription unless upload is enabled.
+Smoke check: `uv run python scripts/ops/smoke_check.py --base http://127.0.0.1:8000`
+
+## What you supply
+
+- Your own LLM key, stored only in `config/config.jsonc` (gitignored).
+- Optional downloader keys (for example TikHub) when you want those sites.
+- Optional local Whisper. If CapsWriter is not running, point `LOCAL_WHISPER_PYTHON` or `AMY_PYTHON` at an interpreter that already has faster-whisper or openai-whisper. Do not commit a machine-specific path.
+
+`capswriter-asr` and `llm-compat` install from public Git repositories. See `[tool.uv.sources]` in `pyproject.toml`.
 
 ## Languages
 
-UI switcher: zh-CN, en, ja, ko, es, fr, pt, de, ru, ar (`?lang=` on static pages; `/view/...&lang=` on reading pages).  
-Default site language: config `language`.
+The home, submit, history, and reading pages switch among zh-CN, en, ja, ko, es, fr, pt, de, ru, and ar.
 
-## ASR without CapsWriter
-
-See [docs/guides/asr-degrade.md](docs/guides/asr-degrade.md) — Path A (Markdown → `/view`) and `LOCAL_WHISPER_PYTHON` / `AMY_PYTHON`.
+Static pages take `?lang=`. Reading pages take `/view/...&lang=`. The default is the `language` field in config.
 
 ## Security
 
-[SECURITY.md](SECURITY.md) — LAN tokens, public `/view` links, optional Feishu/TikHub, no hosted minutes E2E.
+See [SECURITY.md](SECURITY.md). A `/view/{token}` URL is a public read-only capability: anyone with the link can read that transcript. Do not expose a LAN deploy to the open internet without a proxy or VPN. Do not commit `config/config.jsonc`, `config/users.json`, `.env`, or `data/`.
 
-## Documentation languages
+## Upstream
 
-- [中文](README.md) (full)
-- [English](README.en.md) (this file)
-- Stubs: [日本語](README.ja.md) · [한국어](README.ko.md) · [Español](README.es.md) · [Français](README.fr.md) · [Português](README.pt.md) · [Deutsch](README.de.md) · [Русский](README.ru.md) · [العربية](README.ar.md)
-
-Do **not** push to `zlxlabs/VideoTranscriptAPI`. Use a new public repository URL.
+This tree is a local-reading fork. Its paper UI is Yuegao's own. Do not push to `zlxlabs/VideoTranscriptAPI`. Publish to your own repository URL.
